@@ -229,8 +229,9 @@ with main_tab_scoring:
                 st.markdown("##### 🎯 Scoring")
                 sc1, sc2, sc3, sc4 = st.columns(4)
                 
-                # Steel Enforcement: Capped at the max number of steel targets on stage
                 max_steel = max(0, cfg['steel'])
+                max_paper_shots = cfg['paper'] * 2
+
                 plates = sc1.number_input(
                     "Steel Hits", 
                     min_value=0, 
@@ -240,8 +241,6 @@ with main_tab_scoring:
                     key=f"st_{s_name}_{selected_shooter}"
                 )
                 
-                # Paper Alpha Enforcement: Capped at paper shots required
-                max_paper_shots = cfg['paper'] * 2
                 alpha = sc2.number_input(
                     "Alpha (A)", 
                     min_value=0, 
@@ -251,25 +250,21 @@ with main_tab_scoring:
                     key=f"a_{s_name}_{selected_shooter}"
                 )
 
-                # Charlie Enforcement: Capped by remaining paper slots
-                rem_c = max(0, max_paper_shots - alpha)
                 charlie = sc3.number_input(
                     "Charlie (C)", 
                     min_value=0, 
-                    max_value=rem_c, 
-                    value=min(int(existing_score.get("C", 0)), rem_c), 
-                    disabled=(rem_c == 0),
+                    max_value=max_paper_shots, 
+                    value=min(int(existing_score.get("C", 0)), max_paper_shots), 
+                    disabled=(max_paper_shots == 0),
                     key=f"c_{s_name}_{selected_shooter}"
                 )
 
-                # Delta Enforcement: Capped by remaining paper slots
-                rem_d = max(0, max_paper_shots - (alpha + charlie))
                 delta = sc4.number_input(
                     "Delta (D)", 
                     min_value=0, 
-                    max_value=rem_d, 
-                    value=min(int(existing_score.get("D", 0)), rem_d), 
-                    disabled=(rem_d == 0),
+                    max_value=max_paper_shots, 
+                    value=min(int(existing_score.get("D", 0)), max_paper_shots), 
+                    disabled=(max_paper_shots == 0),
                     key=f"d_{s_name}_{selected_shooter}"
                 )
 
@@ -277,17 +272,12 @@ with main_tab_scoring:
                 st.markdown("##### ⚠️ Penalties")
                 p1, p2, p3, p4 = st.columns(4)
 
-                # Mike Enforcement: Total Mikes = (Unscored Paper Hits) + (Unscored Steel Hits)
-                # Remainder across entire round count pool:
-                allocated_hits = plates + alpha + charlie + delta
-                rem_mikes = max(0, total_rounds - allocated_hits)
-                
                 mike = p1.number_input(
                     "Mike (M)", 
                     min_value=0, 
-                    max_value=rem_mikes, 
-                    value=min(int(existing_score.get("M", 0)), rem_mikes), 
-                    disabled=(rem_mikes == 0),
+                    max_value=total_rounds, 
+                    value=min(int(existing_score.get("M", 0)), total_rounds), 
+                    disabled=(total_rounds == 0),
                     key=f"m_{s_name}_{selected_shooter}"
                 )
 
@@ -295,23 +285,34 @@ with main_tab_scoring:
                 fte = p3.number_input("Failure to Engage (FTE)", min_value=0, value=int(existing_score.get("FTE", 0)), key=f"fte_{s_name}_{selected_shooter}")
                 proc = p4.number_input("Procedural (Proc)", min_value=0, value=int(existing_score.get("Proc", 0)), key=f"proc_{s_name}_{selected_shooter}")
 
-                # Total Rounds Allocation Status Indicator across Steel + Paper + Mikes
-                total_accounted_rounds = plates + alpha + charlie + delta + mike
+                # Validation Status Indicators & Checks
+                total_paper_hits = alpha + charlie + delta
+                total_accounted_rounds = plates + total_paper_hits + mike
+
                 if total_rounds > 0:
-                    if total_accounted_rounds == total_rounds:
+                    if total_paper_hits > max_paper_shots:
+                        st.error(f"❌ Paper hits ({total_paper_hits}) exceed total required paper shots ({max_paper_shots})!")
+                    elif total_accounted_rounds > total_rounds:
+                        st.error(f"❌ Total accounted hits & mikes ({total_accounted_rounds}) exceed total stage rounds ({total_rounds})!")
+                    elif total_accounted_rounds == total_rounds:
                         st.caption(f"✅ All {total_rounds} stage rounds accounted for!")
                     else:
-                        st.caption(f"⚠️ Unaccounted rounds: **{total_rounds - total_accounted_rounds}** remaining of {total_rounds}")
+                        st.caption(f"⚠️ Accounted rounds: **{total_accounted_rounds}** / {total_rounds} ({total_rounds - total_accounted_rounds} remaining)")
 
                 save_score = st.form_submit_button("💾 Save Score")
                 if save_score:
-                    is_dnf = (c_status == "Did Not Finish (DNF)")
-                    key = (s_name, selected_shooter)
-                    st.session_state.scores[key] = {
-                        "time": raw_time, "steel": plates, "A": alpha, "C": charlie,
-                        "D": delta, "M": mike, "NS": no_shoot, "FTE": fte, "Proc": proc, "DNF": is_dnf, "PF": pf
-                    }
-                    st.success(f"Score saved for {selected_shooter}!")
+                    if total_paper_hits > max_paper_shots:
+                        st.error(f"Cannot save: Paper hits ({total_paper_hits}) exceed required paper shots ({max_paper_shots}).")
+                    elif total_accounted_rounds > total_rounds:
+                        st.error(f"Cannot save: Total hits and mikes ({total_accounted_rounds}) exceed total stage rounds ({total_rounds}).")
+                    else:
+                        is_dnf = (c_status == "Did Not Finish (DNF)")
+                        key = (s_name, selected_shooter)
+                        st.session_state.scores[key] = {
+                            "time": raw_time, "steel": plates, "A": alpha, "C": charlie,
+                            "D": delta, "M": mike, "NS": no_shoot, "FTE": fte, "Proc": proc, "DNF": is_dnf, "PF": pf
+                        }
+                        st.success(f"Score saved for {selected_shooter}!")
 
             stage_records = []
             for c in active_competitors:
