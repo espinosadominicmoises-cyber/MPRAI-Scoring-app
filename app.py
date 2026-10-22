@@ -447,70 +447,17 @@ with main_tab_scoring:
             <head>
             <meta charset='utf-8'>
             <style>
-                @page {{
-                    margin: 0.75in;
-                }}
-                body {{
-                    font-family: Arial, sans-serif;
-                    font-size: 10pt;
-                    color: #000000;
-                    margin: 0;
-                    padding: 0;
-                }}
-                .header-container {{
-                    text-align: left;
-                    margin: 0 0 15px 0;
-                    padding: 0;
-                }}
-                h2 {{
-                    font-family: Arial, sans-serif;
-                    font-size: 16pt;
-                    font-weight: bold;
-                    margin: 0;
-                    padding: 0;
-                    line-height: 1.1;
-                }}
-                h3 {{
-                    font-family: Arial, sans-serif;
-                    font-size: 12pt;
-                    font-weight: normal;
-                    margin: 0;
-                    padding: 0;
-                    line-height: 1.1;
-                }}
-                p {{
-                    font-family: Arial, sans-serif;
-                    font-size: 10pt;
-                    margin: 0;
-                    padding: 0;
-                    line-height: 1.1;
-                }}
-                table {{
-                    width: 100%;
-                    border-collapse: collapse;
-                    margin-top: 10px;
-                    font-family: Arial, sans-serif;
-                    font-size: 7pt;
-                }}
-                th, td {{
-                    padding: 2px 4px;
-                    border: 1px solid #000000;
-                    text-align: center;
-                    white-space: nowrap;
-                    width: 1%;
-                }}
-                th {{
-                    font-weight: bold;
-                }}
-                td:nth-child(2), th:nth-child(2),
-                td:nth-child(3), th:nth-child(3) {{
-                    text-align: right;
-                }}
-                td:nth-child(5), th:nth-child(5) {{
-                    width: 100%;
-                    white-space: normal;
-                    text-align: left;
-                }}
+                @page {{ margin: 0.75in; }}
+                body {{ font-family: Arial, sans-serif; font-size: 10pt; color: #000000; margin: 0; padding: 0; }}
+                .header-container {{ text-align: left; margin: 0 0 15px 0; padding: 0; }}
+                h2 {{ font-family: Arial, sans-serif; font-size: 16pt; font-weight: bold; margin: 0; padding: 0; line-height: 1.1; }}
+                h3 {{ font-family: Arial, sans-serif; font-size: 12pt; font-weight: normal; margin: 0; padding: 0; line-height: 1.1; }}
+                p {{ font-family: Arial, sans-serif; font-size: 10pt; margin: 0; padding: 0; line-height: 1.1; }}
+                table {{ width: 100%; border-collapse: collapse; margin-top: 10px; font-family: Arial, sans-serif; font-size: 7pt; }}
+                th, td {{ padding: 2px 4px; border: 1px solid #000000; text-align: center; white-space: nowrap; width: 1%; }}
+                th {{ font-weight: bold; }}
+                td:nth-child(2), th:nth-child(2), td:nth-child(3), th:nth-child(3) {{ text-align: right; }}
+                td:nth-child(5), th:nth-child(5) {{ width: 100%; white-space: normal; text-align: left; }}
             </style>
             </head>
             <body>
@@ -519,7 +466,6 @@ with main_tab_scoring:
                     <h3>{division} ({s_name})</h3>
                     <p>Date: {match_date.strftime('%B %d, %Y')}</p>
                 </div>
-                
                 {df_stage_word.to_html(index=False)}
             </body>
             </html>
@@ -584,70 +530,17 @@ with main_tab_scoring:
             <head>
             <meta charset='utf-8'>
             <style>
-                @page {{
-                    margin: 0.75in;
-                }}
-                body {{
-                    font-family: Arial, sans-serif;
-                    font-size: 10pt;
-                    color: #000000;
-                    margin: 0;
-                    padding: 0;
-                }}
-                .header-container {{
-                    text-align: left;
-                    margin: 0 0 15px 0;
-                    padding: 0;
-                }}
-                h2 {{
-                    font-family: Arial, sans-serif;
-                    font-size: 16pt;
-                    font-weight: bold;
-                    margin: 0;
-                    padding: 0;
-                    line-height: 1.1;
-                }}
-                h3 {{
-                    font-family: Arial, sans-serif;
-                    font-size: 12pt;
-                    font-weight: normal;
-                    margin: 0;
-                    padding: 0;
-                    line-height: 1.1;
-                }}
-                p {{
-                    font-family: Arial, sans-serif;
-                    font-size: 10pt;
-                    margin: 0;
-                    padding: 0;
-                    line-height: 1.1;
-                }}
-                table {{
-                    width: 100%;
-                    border-collapse: collapse;
-                    margin-top: 10px;
-                    font-family: Arial, sans-serif;
-                    font-size: 7pt;
-                }}
-                th, td {{
-                    padding: 2px 4px;
-                    border: 1px solid #000000;
-                    text-align: center;
-                    white-space: nowrap;
-                    width: 1%;
-                }}
-                th {{
-                    font-weight: bold;
-                }}
-                td:nth-child(2), th:nth-child(2),
-                td:nth-child(3), th:nth-child(3) {{
-                    text-align: right;
-                }}
-                td:nth-child(5), th:nth-child(5) {{
-                    width: 100%;
-                    white-space: normal;
-                    text-align: left;
-                }}
+                @page {{ margin: 0.75in; }}
+                body {{ font-family: Arial, sans-serif; font-size: 10pt; color: #000000; margin: 0; padding: 0; }}
+                .header-container {{ text-align: left; margin: 0 0 15px 0; padding: 0; }}
+                h2 {{ font-family: Arial, sans-serif; font-size: 16pt; font-weight: bold; margin: 0; padding: 0; line-height: 1.1; }}
+                h3 {{ font-family: Arial, sans-serif; font-size: 12pt; font-weight: normal; margin: 0; padding: 0; line-height: 1.1; }}
+                p {{ font-family: Arial, sans-serif; font-size: 10pt; margin: 0; padding: 0; line-height: 1.1; }}
+                table {{ width: 100%; border-collapse: collapse; margin-top: 10px; font-family: Arial, sans-serif; font-size: 7pt; }}
+                th, td {{ padding: 2px 4px; border: 1px solid #000000; text-align: center; white-space: nowrap; width: 1%; }}
+                th {{ font-weight: bold; }}
+                td:nth-child(2), th:nth-child(2), td:nth-child(3), th:nth-child(3) {{ text-align: right; }}
+                td:nth-child(5), th:nth-child(5) {{ width: 100%; white-space: normal; text-align: left; }}
             </style>
             </head>
             <body>
@@ -656,7 +549,6 @@ with main_tab_scoring:
                     <h3>{division} (Overall Standings)</h3>
                     <p>Date: {match_date.strftime('%B %d, %Y')}</p>
                 </div>
-                
                 {df_overall_print.to_html(index=False)}
             </body>
             </html>
@@ -667,6 +559,136 @@ with main_tab_scoring:
                 data=word_html_o,
                 file_name=f"{match_name}_{division}_Overall_Standings.doc",
                 mime="application/msword"
+            )
+
+            # ==========================================
+            # INTEGRATED COMPETITOR SUMMARY INSPECTOR & ROSTER EXPORT
+            # ==========================================
+            st.divider()
+            st.markdown("### 🔍 Inspect Competitor Cumulative Breakdown")
+            
+            ranked_competitors = df_overall["Competitor"].tolist()
+            selected_comp_inspect = st.selectbox(
+                "Select Competitor to inspect individual performance metrics:", 
+                options=ranked_competitors, 
+                key="select_cum_inspect"
+            )
+
+            # Calculate full cumulative dataset for the entire active roster
+            roster_cum_records = []
+            for _, c_row in df_overall.iterrows():
+                c_name = c_row['Competitor']
+                tot_steel, tot_A, tot_C, tot_D = 0, 0, 0, 0
+                tot_M, tot_NS, tot_FTE, tot_Proc = 0, 0, 0, 0
+                tot_time = 0.0
+
+                for s_name in stage_names:
+                    s_data = st.session_state.scores.get((s_name, c_name), {})
+                    if s_data:
+                        tot_steel += s_data.get('steel', 0)
+                        tot_A += s_data.get('A', 0)
+                        tot_C += s_data.get('C', 0)
+                        tot_D += s_data.get('D', 0)
+                        tot_M += s_data.get('M', 0)
+                        tot_NS += s_data.get('NS', 0)
+                        tot_FTE += s_data.get('FTE', 0)
+                        tot_Proc += s_data.get('Proc', 0)
+                        tot_time += s_data.get('time', 0.0)
+
+                roster_cum_records.append({
+                    "Rank": c_row["Rank"],
+                    "%": f"{c_row['%']:.2f}%",
+                    "Points": f"{c_row['Points']:.4f}",
+                    "#": c_row["#"],
+                    "Competitor": c_name,
+                    "Cat": c_row["Cat"],
+                    "Reg": c_row["Reg"],
+                    "Cls": c_row["Cls"],
+                    "Tag": c_row["Tag"],
+                    "ICS": c_row["ICS"],
+                    "Power": c_row["Power"],
+                    "A": tot_A + tot_steel,
+                    "C": tot_C,
+                    "D": tot_D,
+                    "M": tot_M,
+                    "NS": tot_NS,
+                    "FTE": tot_FTE,
+                    "P": tot_Proc,
+                    "Total Time": f"{tot_time:.2f}"
+                })
+
+            df_roster_cum = pd.DataFrame(roster_cum_records)
+
+            if selected_comp_inspect:
+                comp_info = df_overall[df_overall["Competitor"] == selected_comp_inspect].iloc[0]
+                comp_cum = df_roster_cum[df_roster_cum["Competitor"] == selected_comp_inspect].iloc[0]
+                
+                # Display Metrics Cards for Selected Competitor
+                m_col1, m_col2, m_col3, m_col4, m_col5, m_col6, m_col7, m_col8 = st.columns(8)
+                m_col1.metric("Rank", f"#{comp_info['Rank']}")
+                m_col2.metric("Total Points", f"{comp_info['Points']:.2f}")
+                m_col3.metric("Alpha (A)", comp_cum["A"], help="Includes Paper Alpha + Steel Hits")
+                m_col4.metric("Charlie (C)", comp_cum["C"])
+                m_col5.metric("Delta (D)", comp_cum["D"])
+                m_col6.metric("Mikes (M)", comp_cum["M"])
+                m_col7.metric("Penalties", comp_cum["NS"] + comp_cum["FTE"] + comp_cum["P"], help="NS + FTE + P")
+                m_col8.metric("Total Time", f"{comp_cum['Total Time']}s")
+
+            # Filtered Export View (Only requested columns)
+            export_columns = ["Rank", "%", "Points", "#", "Competitor", "A", "C", "D", "M", "NS", "FTE", "P", "Total Time"]
+            df_roster_cum_export = df_roster_cum[export_columns].copy()
+
+            # Full Roster Cumulative Breakdown Export Section
+            st.markdown("#### 📥 Export Full Roster Cumulative Breakdown")
+            sc_col1, sc_col2 = st.columns(2)
+
+            excel_roster_buffer = io.BytesIO()
+            with pd.ExcelWriter(excel_roster_buffer, engine='xlsxwriter') as writer:
+                df_roster_cum_export.to_excel(writer, sheet_name="Roster_Cumulative_Summary", index=False)
+            excel_roster_data = excel_roster_buffer.getvalue()
+
+            sc_col1.download_button(
+                label="📥 Download Full Roster Cumulative Excel (.xlsx)",
+                data=excel_roster_data,
+                file_name=f"{match_name}_{division}_Full_Roster_Cumulative_Summary.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="dl_roster_cum_excel"
+            )
+
+            word_roster_html = f"""
+            <html>
+            <head>
+            <meta charset='utf-8'>
+            <style>
+                @page {{ margin: 0.75in; }}
+                body {{ font-family: Arial, sans-serif; font-size: 10pt; color: #000000; margin: 0; padding: 0; }}
+                .header-container {{ text-align: left; margin: 0 0 15px 0; padding: 0; }}
+                h2 {{ font-family: Arial, sans-serif; font-size: 16pt; font-weight: bold; margin: 0; padding: 0; line-height: 1.1; }}
+                h3 {{ font-family: Arial, sans-serif; font-size: 12pt; font-weight: normal; margin: 0; padding: 0; line-height: 1.1; }}
+                p {{ font-family: Arial, sans-serif; font-size: 10pt; margin: 0; padding: 0; line-height: 1.1; }}
+                table {{ width: 100%; border-collapse: collapse; margin-top: 10px; font-family: Arial, sans-serif; font-size: 7pt; }}
+                th, td {{ padding: 3px 5px; border: 1px solid #000000; text-align: center; white-space: nowrap; }}
+                th {{ font-weight: bold; background-color: #f2f2f2; }}
+                td:nth-child(5), th:nth-child(5) {{ text-align: left; }}
+            </style>
+            </head>
+            <body>
+                <div class="header-container">
+                    <h2>{match_name}</h2>
+                    <h3>Full Roster Cumulative Hit & Time Summary</h3>
+                    <p>Division: {division} | Date: {match_date.strftime('%B %d, %Y')}</p>
+                </div>
+                {df_roster_cum_export.to_html(index=False)}
+            </body>
+            </html>
+            """
+
+            sc_col2.download_button(
+                label="📥 Download Full Roster Cumulative Word (.doc)",
+                data=word_roster_html,
+                file_name=f"{match_name}_{division}_Full_Roster_Cumulative_Summary.doc",
+                mime="application/msword",
+                key="dl_roster_cum_word"
             )
         else:
             st.warning("No active competitors available for overall standings.")
