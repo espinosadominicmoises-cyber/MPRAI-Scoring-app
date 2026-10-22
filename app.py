@@ -42,13 +42,15 @@ for s in range(1, int(num_stages) + 1):
         steel = st.number_input(f"Steel Plates & Poppers", min_value=0, value=0, key=f"st_{s}")
         
         max_stage_points = (paper * 2 + steel) * 5
+        total_rounds = (paper * 2) + steel
         stage_names.append(custom_s_name)
         stage_config[custom_s_name] = {
             "paper": paper,
             "steel": steel,
-            "max_pts": max_stage_points
+            "max_pts": max_stage_points,
+            "total_rounds": total_rounds
         }
-        st.caption(f"Max Points: **{max_stage_points} pts**")
+        st.caption(f"Max Points: **{max_stage_points} pts** | Total Rounds: **{total_rounds}**")
 
 # ==========================================
 # DATA PERSISTENCE (SAVE / LOAD MATCH)
@@ -66,7 +68,7 @@ match_state_data = {
     "match_name": match_name,
     "division": division,
     "competitors": st.session_state.competitors_list,
-    "scores": {str(k): v for k, v in st.session_state.scores.items()}
+    "scores": {f"{k[0]}|||{k[1]}": v for k, v in st.session_state.scores.items()}
 }
 st.sidebar.download_button(
     label="📥 Save Match State (JSON)",
@@ -82,7 +84,13 @@ if uploaded_file is not None:
         loaded_data = json.load(uploaded_file)
         st.session_state.competitors_list = loaded_data.get("competitors", [])
         raw_scores = loaded_data.get("scores", {})
-        st.session_state.scores = {eval(k): v for k, v in raw_scores.items()}
+        
+        parsed_scores = {}
+        for k, v in raw_scores.items():
+            if "|||" in k:
+                s_name, comp_name = k.split("|||", 1)
+                parsed_scores[(s_name, comp_name)] = v
+        st.session_state.scores = parsed_scores
         st.sidebar.success("Match state loaded successfully!")
     except Exception as e:
         st.sidebar.error(f"Error loading file: {e}")
@@ -169,6 +177,7 @@ with main_tab_roster:
                         st.session_state.competitors_list = [c for c in st.session_state.competitors_list if c["Competitor"] != selected_to_edit]
                         for idx, c in enumerate(st.session_state.competitors_list, 1):
                             c["#"] = idx
+                        st.session_state.scores = {k: v for k, v in st.session_state.scores.items() if k[1] != selected_to_edit}
                         st.warning(f"Deleted {selected_to_edit}!")
                         st.rerun()
             else:
@@ -194,7 +203,8 @@ with main_tab_scoring:
         with tab_objects[i]:
             st.subheader(f"{s_name} Scoreboard")
             cfg = stage_config[s_name]
-            st.info(f"Targets: **{cfg['paper']} Paper** | **{cfg['steel']} Steel** | Max Stage Points: **{cfg['max_pts']}**")
+            total_rounds = cfg['total_rounds']
+            st.info(f"Targets: **{cfg['paper']} Paper** ({cfg['paper']*2} shots) | **{cfg['steel']} Steel** ({cfg['steel']} shots) | Total Required Rounds: **{total_rounds}** | Max Points: **{cfg['max_pts']}**")
             
             active_competitors = [c for c in st.session_state.competitors_list if not c['DQ']]
 
@@ -218,18 +228,80 @@ with main_tab_scoring:
                 # --- Section 1: Scoring ---
                 st.markdown("##### 🎯 Scoring")
                 sc1, sc2, sc3, sc4 = st.columns(4)
-                plates = sc1.number_input("Steel Hits", min_value=0, max_value=cfg['steel'] if cfg['steel'] > 0 else 100, value=int(existing_score.get("steel", 0)), key=f"st_{s_name}_{selected_shooter}")
-                alpha = sc2.number_input("Alpha (A)", min_value=0, value=int(existing_score.get("A", 0)), key=f"a_{s_name}_{selected_shooter}")
-                charlie = sc3.number_input("Charlie (C)", min_value=0, value=int(existing_score.get("C", 0)), key=f"c_{s_name}_{selected_shooter}")
-                delta = sc4.number_input("Delta (D)", min_value=0, value=int(existing_score.get("D", 0)), key=f"d_{s_name}_{selected_shooter}")
+                
+                # Steel Enforcement: Capped at the max number of steel targets on stage
+                max_steel = max(0, cfg['steel'])
+                plates = sc1.number_input(
+                    "Steel Hits", 
+                    min_value=0, 
+                    max_value=max_steel, 
+                    value=min(int(existing_score.get("steel", 0)), max_steel), 
+                    disabled=(max_steel == 0),
+                    key=f"st_{s_name}_{selected_shooter}"
+                )
+                
+                # Paper Alpha Enforcement: Capped at paper shots required
+                max_paper_shots = cfg['paper'] * 2
+                alpha = sc2.number_input(
+                    "Alpha (A)", 
+                    min_value=0, 
+                    max_value=max_paper_shots, 
+                    value=min(int(existing_score.get("A", 0)), max_paper_shots), 
+                    disabled=(max_paper_shots == 0),
+                    key=f"a_{s_name}_{selected_shooter}"
+                )
+
+                # Charlie Enforcement: Capped by remaining paper slots
+                rem_c = max(0, max_paper_shots - alpha)
+                charlie = sc3.number_input(
+                    "Charlie (C)", 
+                    min_value=0, 
+                    max_value=rem_c, 
+                    value=min(int(existing_score.get("C", 0)), rem_c), 
+                    disabled=(rem_c == 0),
+                    key=f"c_{s_name}_{selected_shooter}"
+                )
+
+                # Delta Enforcement: Capped by remaining paper slots
+                rem_d = max(0, max_paper_shots - (alpha + charlie))
+                delta = sc4.number_input(
+                    "Delta (D)", 
+                    min_value=0, 
+                    max_value=rem_d, 
+                    value=min(int(existing_score.get("D", 0)), rem_d), 
+                    disabled=(rem_d == 0),
+                    key=f"d_{s_name}_{selected_shooter}"
+                )
 
                 # --- Section 2: Penalties ---
                 st.markdown("##### ⚠️ Penalties")
                 p1, p2, p3, p4 = st.columns(4)
-                mike = p1.number_input("Mike (M)", min_value=0, value=int(existing_score.get("M", 0)), key=f"m_{s_name}_{selected_shooter}")
+
+                # Mike Enforcement: Total Mikes = (Unscored Paper Hits) + (Unscored Steel Hits)
+                # Remainder across entire round count pool:
+                allocated_hits = plates + alpha + charlie + delta
+                rem_mikes = max(0, total_rounds - allocated_hits)
+                
+                mike = p1.number_input(
+                    "Mike (M)", 
+                    min_value=0, 
+                    max_value=rem_mikes, 
+                    value=min(int(existing_score.get("M", 0)), rem_mikes), 
+                    disabled=(rem_mikes == 0),
+                    key=f"m_{s_name}_{selected_shooter}"
+                )
+
                 no_shoot = p2.number_input("No-Shoot (NS)", min_value=0, value=int(existing_score.get("NS", 0)), key=f"ns_{s_name}_{selected_shooter}")
                 fte = p3.number_input("Failure to Engage (FTE)", min_value=0, value=int(existing_score.get("FTE", 0)), key=f"fte_{s_name}_{selected_shooter}")
                 proc = p4.number_input("Procedural (Proc)", min_value=0, value=int(existing_score.get("Proc", 0)), key=f"proc_{s_name}_{selected_shooter}")
+
+                # Total Rounds Allocation Status Indicator across Steel + Paper + Mikes
+                total_accounted_rounds = plates + alpha + charlie + delta + mike
+                if total_rounds > 0:
+                    if total_accounted_rounds == total_rounds:
+                        st.caption(f"✅ All {total_rounds} stage rounds accounted for!")
+                    else:
+                        st.caption(f"⚠️ Unaccounted rounds: **{total_rounds - total_accounted_rounds}** remaining of {total_rounds}")
 
                 save_score = st.form_submit_button("💾 Save Score")
                 if save_score:
@@ -310,20 +382,21 @@ with main_tab_scoring:
 
             # --- Inline Hit Breakdown Inspection ---
             with st.expander(f"🔍 View Hit Breakdown ({s_name})"):
-                inspect_shooter = st.selectbox("Select Competitor to Inspect Hits", options=df_stage["Competitor"].tolist(), key=f"inspect_{s_name}")
-                row_data = df_stage[df_stage["Competitor"] == inspect_shooter].iloc[0]
-                
-                hb_col1, hb_col2, hb_col3, hb_col4, hb_col5, hb_col6, hb_col7, hb_col8 = st.columns(8)
-                hb_col1.metric("Steels", int(row_data["Steel"]))
-                hb_col2.metric("Alpha (A)", int(row_data["A"]))
-                hb_col3.metric("Charlie (C)", int(row_data["C"]))
-                hb_col4.metric("Delta (D)", int(row_data["D"]))
-                hb_col5.metric("Mike (M)", int(row_data["M"]))
-                hb_col6.metric("No-Shoot", int(row_data["NS"]))
-                hb_col7.metric("FTE", int(row_data["FTE"]))
-                hb_col8.metric("Procedural", int(row_data["Proc"]))
+                if not df_stage.empty:
+                    inspect_shooter = st.selectbox("Select Competitor to Inspect Hits", options=df_stage["Competitor"].tolist(), key=f"inspect_{s_name}")
+                    row_data = df_stage[df_stage["Competitor"] == inspect_shooter].iloc[0]
+                    
+                    hb_col1, hb_col2, hb_col3, hb_col4, hb_col5, hb_col6, hb_col7, hb_col8 = st.columns(8)
+                    hb_col1.metric("Steels", int(row_data["Steel"]))
+                    hb_col2.metric("Alpha (A)", int(row_data["A"]))
+                    hb_col3.metric("Charlie (C)", int(row_data["C"]))
+                    hb_col4.metric("Delta (D)", int(row_data["D"]))
+                    hb_col5.metric("Mike (M)", int(row_data["M"]))
+                    hb_col6.metric("No-Shoot", int(row_data["NS"]))
+                    hb_col7.metric("FTE", int(row_data["FTE"]))
+                    hb_col8.metric("Procedural", int(row_data["Proc"]))
 
-            # Print / Export view for Excel (keeps raw points, time, hit factor)
+            # Print / Export view for Excel
             df_stage_print = df_stage[["Rank", "Stage %", "Stage Points", "#", "Competitor", "Cat", "Reg", "Cls", "Tag", "ICS", "Raw Points", "Raw Time", "Hit Factor", "Power"]].copy()
             df_stage_print["Stage %"] = df_stage_print["Stage %"].round(2).astype(str) + "%"
             df_stage_print["Stage Points"] = df_stage_print["Stage Points"].round(4)
@@ -331,7 +404,7 @@ with main_tab_scoring:
             df_stage_print["Raw Time"] = df_stage_print["Raw Time"].round(2)
             df_stage_print["Hit Factor"] = df_stage_print["Hit Factor"].round(4)
 
-            # Dedicated Word Export view (excludes raw points, time, and hit factor)
+            # Dedicated Word Export view
             df_stage_word = df_stage[["Rank", "Stage %", "Stage Points", "#", "Competitor", "Cat", "Reg", "Cls", "Tag", "ICS", "Power"]].copy()
             df_stage_word["Stage %"] = df_stage_word["Stage %"].round(2).astype(str) + "%"
             df_stage_word["Stage Points"] = df_stage_word["Stage Points"].round(4)
