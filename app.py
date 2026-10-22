@@ -4,8 +4,24 @@ import numpy as np
 from datetime import date
 import io
 import json
+import streamlit.components.v1 as components
 
 st.set_page_config(page_title="IPSC Match Scoring System", layout="wide")
+
+# ==========================================
+# BROWSER REFRESH / CLOSE CONFIRMATION PROMPT
+# ==========================================
+components.html(
+    """
+    <script>
+    window.addEventListener('beforeunload', function (e) {
+        e.preventDefault();
+        e.returnValue = '';
+    });
+    </script>
+    """,
+    height=0,
+)
 
 # ==========================================
 # SIDEBAR: MATCH SETUP & CONFIGURATION
