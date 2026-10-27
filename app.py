@@ -1,7 +1,8 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from datetime import date
+from datetime import date, datetime, timezone, timedelta
+import hashlib
 import io
 import json
 from fractions import Fraction
@@ -18,6 +19,20 @@ try:
     HAS_DOCX = True
 except ImportError:          # the app still runs; only Word export is unavailable
     HAS_DOCX = False
+try:
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.units import inch, cm
+    from reportlab.lib import colors
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfgen import canvas as rl_canvas
+    from reportlab.pdfbase.ttfonts import TTFont
+    from xml.sax.saxutils import escape as _xml_escape
+    HAS_PDF = True
+except ImportError:          # the app still runs; only PDF export is unavailable
+    HAS_PDF = False
 import streamlit.components.v1 as components
 
 # ==========================================
@@ -683,6 +698,32 @@ def _fmt_cell(v):
     return str(v)
 
 
+# ==========================================
+# EXPORT FOOTER (transparency stamp on every PDF / Word export)
+# ==========================================
+EXPORT_TZ_HOURS = 8          # Philippines (PHT, UTC+8, no DST). Change if you run the app elsewhere.
+EXPORT_TZ_LABEL = "PHT"
+FOOTER_PT = 7
+
+
+def _export_footer_lines(lines, df):
+    """Two short lines for the footer:
+    1) when it was exported + how many rows + a short data fingerprint
+    2) which report / match / division it belongs to (so a stray page is still identifiable)."""
+    now = datetime.now(timezone(timedelta(hours=EXPORT_TZ_HOURS)))
+    stamp = now.strftime("%B %d, %Y, %I:%M:%S %p").replace(" 0", " ")
+    sign = "+" if EXPORT_TZ_HOURS >= 0 else "-"
+    tz = f"{EXPORT_TZ_LABEL} (UTC{sign}{abs(EXPORT_TZ_HOURS)})"
+    # Fingerprint of the exact table contents: two files with the same ID hold identical data
+    digest = hashlib.sha256(
+        (",".join(map(str, df.columns)) + "\n" +
+         "\n".join(",".join(_fmt_cell(v) for v in r) for r in df.itertuples(index=False, name=None))
+         ).encode("utf-8")).hexdigest()[:8].upper()
+    line1 = f"Exported: {stamp} {tz}  |  Rows: {len(df)}  |  Data ID: {digest}"
+    line2 = "  |  ".join(text for text, _, _ in lines)
+    return line1, line2
+
+
 def build_word_docx(lines, df, logo_left=None, logo_right=None):
     """Build a real .docx: logos + title lines at the top, then the table.
     lines: list of (text, point_size, bold)."""
@@ -793,6 +834,51 @@ def build_word_docx(lines, df, logo_left=None, logo_right=None):
         for i, v in enumerate(r):
             fill(cells[i], v, col_w[i], align_for(i))
 
+    # ---- footer (bottom-left): export date/time + report info, page numbers on the right
+    sec.footer_distance = Inches(0.3)
+    f1, f2 = _export_footer_lines(lines, df)
+    foot = sec.footer
+    foot.is_linked_to_previous = False
+    p1 = foot.paragraphs[0]
+    p1.style = doc.styles["Normal"]
+    p1.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    r = p1.add_run(f1)
+    r.font.size, r.font.name = Pt(FOOTER_PT), "Arial"
+    p2 = foot.add_paragraph()
+    p2.style = doc.styles["Normal"]
+    p2.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    r = p2.add_run(f2)
+    r.font.size, r.font.name = Pt(FOOTER_PT), "Arial"
+    # "Page X of Y" fields, right-aligned on the first footer line via a right tab stop
+    from docx.enum.text import WD_TAB_ALIGNMENT
+    p1.paragraph_format.tab_stops.add_tab_stop(Inches(usable_in), WD_TAB_ALIGNMENT.RIGHT)
+
+    def _field(par, instr):
+        # each part of the field gets its own sized run so the digits match the footer text
+        def part(el):
+            run = par.add_run()
+            run.font.size, run.font.name = Pt(FOOTER_PT), "Arial"
+            run._r.append(el)
+        for kind in ("begin", "instr", "separate", "text", "end"):
+            if kind == "instr":
+                el = OxmlElement("w:instrText")
+                el.set(qn("xml:space"), "preserve")
+                el.text = f" {instr} "
+            elif kind == "text":
+                el = OxmlElement("w:t")
+                el.text = "1"
+            else:
+                el = OxmlElement("w:fldChar")
+                el.set(qn("w:fldCharType"), kind)
+            part(el)
+
+    tab = p1.add_run("\tPage ")
+    tab.font.size, tab.font.name = Pt(FOOTER_PT), "Arial"
+    _field(p1, "PAGE")
+    of = p1.add_run(" of ")
+    of.font.size, of.font.name = Pt(FOOTER_PT), "Arial"
+    _field(p1, "NUMPAGES")
+
     buf = io.BytesIO()
     doc.save(buf)
     return buf.getvalue()
@@ -808,6 +894,169 @@ def word_export_button(container, label, file_name, lines, df, key=None):
         data=build_word_docx(lines, df, logo_left, logo_right),
         file_name=file_name,
         mime=DOCX_MIME,
+        key=key,
+    )
+
+
+_PDF_FONTS = None
+
+
+def _pdf_fonts():
+    """Arial if installed (same font as the Word export); otherwise Liberation Sans / Helvetica
+    (metrically identical to Arial)."""
+    global _PDF_FONTS
+    if _PDF_FONTS:
+        return _PDF_FONTS
+    pairs = [
+        ("/Library/Fonts/Arial.ttf", "/Library/Fonts/Arial Bold.ttf"),
+        ("/System/Library/Fonts/Supplemental/Arial.ttf", "/System/Library/Fonts/Supplemental/Arial Bold.ttf"),
+        ("C:/Windows/Fonts/arial.ttf", "C:/Windows/Fonts/arialbd.ttf"),
+        ("/usr/share/fonts/truetype/msttcorefonts/Arial.ttf", "/usr/share/fonts/truetype/msttcorefonts/Arial_Bold.ttf"),
+        ("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"),
+    ]
+    for reg, bold in pairs:
+        if Path(reg).exists() and Path(bold).exists():
+            try:
+                pdfmetrics.registerFont(TTFont("ScoreSans", reg))
+                pdfmetrics.registerFont(TTFont("ScoreSans-Bold", bold))
+                _PDF_FONTS = ("ScoreSans", "ScoreSans-Bold")
+                return _PDF_FONTS
+            except Exception:
+                continue
+    _PDF_FONTS = ("Helvetica", "Helvetica-Bold")
+    return _PDF_FONTS
+
+
+def build_pdf(lines, df, logo_left=None, logo_right=None):
+    """PDF twin of build_word_docx: same page size/margins, logos, title lines, font, font size,
+    column widths, alignment and shaded, repeating header row."""
+    reg, bold = _pdf_fonts()
+    usable_in = PAGE_W_IN - 2 * PAGE_MARGIN_IN
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=(PAGE_W_IN * inch, PAGE_H_IN * inch),
+        leftMargin=PAGE_MARGIN_IN * inch, rightMargin=PAGE_MARGIN_IN * inch,
+        topMargin=PAGE_MARGIN_IN * inch, bottomMargin=PAGE_MARGIN_IN * inch,
+    )
+    story = []
+
+    def logo_flowable(logo_bytes, box_cm, h_align):
+        box_w, box_h = box_cm
+        w, h = Image.open(io.BytesIO(logo_bytes)).size
+        if abs((w / h) - (box_w / box_h)) / (box_w / box_h) <= 0.02:
+            out_w, out_h = box_w, box_h
+        else:
+            scale = min(box_w / w, box_h / h)
+            out_w, out_h = w * scale, h * scale
+        img = RLImage(io.BytesIO(logo_bytes), width=out_w * cm, height=out_h * cm)
+        img.hAlign = h_align
+        return img
+
+    def line_paras(align):
+        return [
+            Paragraph(_xml_escape(text), ParagraphStyle(
+                f"hdr{i}", fontName=bold if b else reg, fontSize=size, leading=size * 1.15, alignment=align))
+            for i, (text, size, b) in enumerate(lines)
+        ]
+
+    if logo_left or logo_right:
+        side_w = 1.75
+        hdr = Table(
+            [[logo_flowable(logo_left, LOGO_BOX_CM["left"], "LEFT") if logo_left else "",
+              line_paras(TA_CENTER),
+              logo_flowable(logo_right, LOGO_BOX_CM["right"], "RIGHT") if logo_right else ""]],
+            colWidths=[side_w * inch, (usable_in - 2 * side_w) * inch, side_w * inch],
+        )
+        hdr.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0.08 * inch), ("RIGHTPADDING", (0, 0), (-1, -1), 0.08 * inch),
+            ("TOPPADDING", (0, 0), (-1, -1), 0), ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+        ]))
+        story.append(hdr)
+    else:
+        story.extend(line_paras(TA_LEFT))
+    story.append(Spacer(1, 17.5))
+
+    # ---- data table (identical column logic to the Word export)
+    right_idx, left_idx = {1, 2, 3}, {4}
+    cols = list(df.columns)
+    rows = [[_fmt_cell(v) for v in r] for r in df.itertuples(index=False, name=None)]
+    fit_w = [
+        max([_text_width_in(c, True)] + [_text_width_in(r[i], False) for r in rows]) + CELL_PAD_IN
+        for i, c in enumerate(cols)
+    ]
+    col_w = list(fit_w)
+    if len(cols) > 4:
+        col_w[4] = max(usable_in - (sum(fit_w) - fit_w[4]), 1.0)
+
+    table = Table([[str(c) for c in cols]] + rows, colWidths=[w * inch for w in col_w], repeatRows=1)
+    style = [
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+        ("FONTNAME", (0, 0), (-1, 0), bold),
+        ("FONTNAME", (0, 1), (-1, -1), reg),
+        ("FONTSIZE", (0, 0), (-1, -1), TABLE_FONT_PT),
+        ("LEADING", (0, 0), (-1, -1), TABLE_FONT_PT * 1.15),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F2F2F2")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0.08 * inch), ("RIGHTPADDING", (0, 0), (-1, -1), 0.08 * inch),
+        ("TOPPADDING", (0, 0), (-1, -1), 1.5), ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
+    ]
+    for i in range(len(cols)):
+        a = "LEFT" if i in left_idx else "RIGHT" if i in right_idx else "CENTER"
+        style.append(("ALIGN", (i, 0), (i, -1), a))
+    table.setStyle(TableStyle(style))
+    story.append(table)
+
+    # ---- footer (bottom-left): export date/time + report info, page numbers on the right
+    f1, f2 = _export_footer_lines(lines, df)
+
+    class _NumberedCanvas(rl_canvas.Canvas):
+        """Two-pass canvas so the footer can say 'Page X of Y'."""
+        def __init__(self, *a, **kw):
+            super().__init__(*a, **kw)
+            self._saved = []
+
+        def showPage(self):
+            self._saved.append(dict(self.__dict__))
+            self._startPage()
+
+        def save(self):
+            total = len(self._saved)
+            for state in self._saved:
+                self.__dict__.update(state)
+                self._draw_footer(total)
+                super().showPage()
+            super().save()
+
+        def _draw_footer(self, total):
+            left = PAGE_MARGIN_IN * inch
+            right = (PAGE_W_IN - PAGE_MARGIN_IN) * inch
+            self.setFont(reg, FOOTER_PT)
+            self.setFillColor(colors.HexColor("#444444"))
+            self.drawString(left, 0.42 * inch, f1)
+            self.drawRightString(right, 0.42 * inch, f"Page {self._pageNumber} of {total}")
+            line2 = f2
+            max_w = right - left
+            while pdfmetrics.stringWidth(line2, reg, FOOTER_PT) > max_w and len(line2) > 4:
+                line2 = line2[:-2]            # never let a long title run off the page
+            if line2 != f2:
+                line2 = line2.rstrip() + "…"
+            self.drawString(left, 0.30 * inch, line2)
+
+    doc.build(story, canvasmaker=_NumberedCanvas)
+    return buf.getvalue()
+
+
+def pdf_export_button(container, label, file_name, lines, df, key=None):
+    if not HAS_PDF:
+        container.warning("PDF export needs the reportlab package. In Terminal run: "
+                          "python3 -m pip install reportlab   then restart the app.")
+        return
+    container.download_button(
+        label=label,
+        data=build_pdf(lines, df, logo_left, logo_right),
+        file_name=file_name,
+        mime="application/pdf",
         key=key,
     )
 
@@ -899,7 +1148,10 @@ if division in ["Production", "Production Optics", "PCC"]:
 else:
     default_power_options = ["Major", "Minor"]
 
-num_stages = st.sidebar.number_input("How many stages?", min_value=1, max_value=20, key="num_stages")
+with st.sidebar.form("num_stages_form", border=False):
+    st.number_input("How many stages?", min_value=1, max_value=20, key="num_stages")
+    st.form_submit_button("✅ Apply number of stages")
+num_stages = st.session_state["num_stages"]   # only changes when Apply is pressed
 
 # Custom Stage Names & Targets
 st.sidebar.header("📋 Stage Names & Targets")
@@ -912,9 +1164,15 @@ for s in range(1, int(num_stages) + 1):
     st.session_state.setdefault(f"st_{s}", 0)
 
     with st.sidebar.expander(f"Stage {s} Setup", expanded=(s == 1)):
-        custom_s_name = st.text_input(f"Stage {s} Title", key=f"s_name_{s}")
-        paper = st.number_input("Paper Targets", min_value=0, key=f"p_{s}")
-        steel = st.number_input("Steel Plates & Poppers", min_value=0, key=f"st_{s}")
+        with st.form(f"stage_form_{s}", border=False):
+            st.text_input(f"Stage {s} Title", key=f"s_name_{s}")
+            st.number_input("Paper Targets", min_value=0, key=f"p_{s}")
+            st.number_input("Steel Plates & Poppers", min_value=0, key=f"st_{s}")
+            st.form_submit_button(f"✅ Apply Stage {s}")
+        # Values only change when Apply is pressed
+        custom_s_name = st.session_state[f"s_name_{s}"]
+        paper = int(st.session_state[f"p_{s}"])
+        steel = int(st.session_state[f"st_{s}"])
 
         max_stage_points = (paper * 2 + steel) * 5
         total_rounds = (paper * 2) + steel
@@ -1376,6 +1634,27 @@ with main_tab_scoring:
                 "Hit Factor": "{:.4f}"
             }), use_container_width=True, hide_index=True)
 
+            # Dedicated Word Export view
+            df_stage_word = df_stage[["Rank", "Stage %", "Stage Points", "#", "Competitor", "Cat", "Reg", "Cls", "Tag", "ICS", "Power"]].copy()
+            df_stage_word["Stage %"] = df_stage_word["Stage %"].round(2).astype(str) + "%"
+            df_stage_word["Stage Points"] = df_stage_word["Stage Points"].round(4)
+
+            # Streamlined Export Section
+            st.markdown("#### 📥 Export Stage Results")
+            col_ex1, col_ex2 = st.columns(2)
+
+            pdf_export_button(
+                col_ex1, "📥 Download PDF (.pdf)", f"{match_name}_{division}_{s_name}_Results.pdf",
+                [(match_name, 16, True), (f"{division} ({s_name})", 12, False), (f"Date: {match_date.strftime('%B %d, %Y')}", 10, False)],
+                df_stage_word, key=f"dl_pdf_{s_name}",
+            )
+
+            word_export_button(
+                col_ex2, "📥 Download Word (.docx)", f"{match_name}_{division}_{s_name}_Results.docx",
+                [(match_name, 16, True), (f"{division} ({s_name})", 12, False), (f"Date: {match_date.strftime('%B %d, %Y')}", 10, False)],
+                df_stage_word, key=f"dl_word_{s_name}",
+            )
+
             # --- Inline Hit Breakdown Inspection ---
             with st.expander(f"🔍 View Hit Breakdown ({s_name})"):
                 if not df_stage.empty:
@@ -1392,39 +1671,31 @@ with main_tab_scoring:
                     hb_col7.metric("FTE", int(row_data["FTE"]))
                     hb_col8.metric("Procedural", int(row_data["Proc"]))
 
-            # Print / Export view for Excel
-            df_stage_print = df_stage[["Rank", "Stage %", "Stage Points", "#", "Competitor", "Cat", "Reg", "Cls", "Tag", "ICS", "Raw Points", "Raw Time", "Hit Factor", "Power"]].copy()
-            df_stage_print["Stage %"] = df_stage_print["Stage %"].round(2).astype(str) + "%"
-            df_stage_print["Stage Points"] = df_stage_print["Stage Points"].round(4)
-            df_stage_print["Raw Points"] = df_stage_print["Raw Points"].round(4)
-            df_stage_print["Raw Time"] = df_stage_print["Raw Time"].round(2)
-            df_stage_print["Hit Factor"] = df_stage_print["Hit Factor"].round(4)
-
-            # Dedicated Word Export view
-            df_stage_word = df_stage[["Rank", "Stage %", "Stage Points", "#", "Competitor", "Cat", "Reg", "Cls", "Tag", "ICS", "Power"]].copy()
-            df_stage_word["Stage %"] = df_stage_word["Stage %"].round(2).astype(str) + "%"
-            df_stage_word["Stage Points"] = df_stage_word["Stage Points"].round(4)
-
-            # Streamlined Export Section
-            st.markdown("#### 📥 Export Stage Results")
-            col_ex1, col_ex2 = st.columns(2)
-
-            excel_buffer = io.BytesIO()
-            with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
-                df_stage_print.to_excel(writer, sheet_name=s_name, index=False)
-            excel_data = excel_buffer.getvalue()
-            col_ex1.download_button(
-                label="📥 Download Excel (.xlsx)",
-                data=excel_data,
-                file_name=f"{match_name}_{division}_{s_name}_Results.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key=f"dl_excel_{s_name}"
+            # Full-roster hit breakdown for this stage (A includes steel hits, like the cumulative export)
+            df_stage_hits = pd.DataFrame({
+                "Rank": df_stage["Rank"],
+                "Stage %": df_stage["Stage %"].round(2).astype(str) + "%",
+                "Stage Points": df_stage["Stage Points"].round(4),
+                "#": df_stage["#"],
+                "Competitor": df_stage["Competitor"],
+                "A": df_stage["A"] + df_stage["Steel"],
+                "C": df_stage["C"], "D": df_stage["D"], "M": df_stage["M"],
+                "NS": df_stage["NS"], "FTE": df_stage["FTE"], "P": df_stage["Proc"],
+                "Time": df_stage["Raw Time"].map(lambda t: f"{t:.2f}"),
+            })
+            st.markdown("#### 📥 Export Hit Breakdown")
+            col_hb1, col_hb2 = st.columns(2)
+            hb_lines = [(match_name, 16, True), (f"{division} ({s_name}) - Hit Breakdown", 12, False),
+                        (f"Date: {match_date.strftime('%B %d, %Y')}", 10, False)]
+            pdf_export_button(
+                col_hb1, "📥 Download Hit Breakdown PDF (.pdf)",
+                f"{match_name}_{division}_{s_name}_Hit_Breakdown.pdf",
+                hb_lines, df_stage_hits, key=f"dl_pdf_hits_{s_name}",
             )
-
             word_export_button(
-                col_ex2, "📥 Download Word (.docx)", f"{match_name}_{division}_{s_name}_Results.docx",
-                [(match_name, 16, True), (f"{division} ({s_name})", 12, False), (f"Date: {match_date.strftime('%B %d, %Y')}", 10, False)],
-                df_stage_word, key=f"dl_word_{s_name}",
+                col_hb2, "📥 Download Hit Breakdown Word (.docx)",
+                f"{match_name}_{division}_{s_name}_Hit_Breakdown.docx",
+                hb_lines, df_stage_hits, key=f"dl_word_hits_{s_name}",
             )
 
             for _, row in df_stage.iterrows():
@@ -1462,35 +1733,22 @@ with main_tab_scoring:
             st.markdown("#### 📥 Export Overall Standings")
             col_o1, col_o2 = st.columns(2)
 
-            excel_buffer_o = io.BytesIO()
-            with pd.ExcelWriter(excel_buffer_o, engine='xlsxwriter') as writer:
-                df_overall_print.to_excel(writer, sheet_name="Overall", index=False)
-            excel_data_o = excel_buffer_o.getvalue()
-            col_o1.download_button(
-                label="📥 Download Excel (.xlsx)",
-                data=excel_data_o,
-                file_name=f"{match_name}_{division}_Overall_Standings.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            pdf_export_button(
+                col_o1, "📥 Download PDF (.pdf)", f"{match_name}_{division}_Overall_Standings.pdf",
+                [(match_name, 16, True), (f"{division} (Overall Standings)", 12, False), (f"Date: {match_date.strftime('%B %d, %Y')}", 10, False)],
+                df_overall_print, key="dl_pdf_overall",
             )
 
             word_export_button(
                 col_o2, "📥 Download Word (.docx)", f"{match_name}_{division}_Overall_Standings.docx",
                 [(match_name, 16, True), (f"{division} (Overall Standings)", 12, False), (f"Date: {match_date.strftime('%B %d, %Y')}", 10, False)],
-                df_overall_print,
+                df_overall_print, key="dl_word_overall",
             )
 
             # ==========================================
             # INTEGRATED COMPETITOR SUMMARY INSPECTOR & ROSTER EXPORT
             # ==========================================
             st.divider()
-            st.markdown("### 🔍 Inspect Competitor Cumulative Breakdown")
-
-            ranked_competitors = df_overall["Competitor"].tolist()
-            selected_comp_inspect = st.selectbox(
-                "Select Competitor to inspect individual performance metrics:",
-                options=ranked_competitors,
-                key="select_cum_inspect"
-            )
 
             # Calculate full cumulative dataset for the entire active roster
             roster_cum_records = []
@@ -1537,20 +1795,27 @@ with main_tab_scoring:
 
             df_roster_cum = pd.DataFrame(roster_cum_records)
 
-            if selected_comp_inspect:
-                comp_info = df_overall[df_overall["Competitor"] == selected_comp_inspect].iloc[0]
-                comp_cum = df_roster_cum[df_roster_cum["Competitor"] == selected_comp_inspect].iloc[0]
+            with st.expander("🔍 View Cumulative Hit Breakdown"):
+                ranked_competitors = df_overall["Competitor"].tolist()
+                selected_comp_inspect = st.selectbox(
+                    "Select Competitor to inspect individual performance metrics:",
+                    options=ranked_competitors,
+                    key="select_cum_inspect"
+                )
+                if selected_comp_inspect:
+                    comp_info = df_overall[df_overall["Competitor"] == selected_comp_inspect].iloc[0]
+                    comp_cum = df_roster_cum[df_roster_cum["Competitor"] == selected_comp_inspect].iloc[0]
 
-                # Display Metrics Cards for Selected Competitor
-                m_col1, m_col2, m_col3, m_col4, m_col5, m_col6, m_col7, m_col8 = st.columns(8)
-                m_col1.metric("Rank", f"#{comp_info['Rank']}")
-                m_col2.metric("Total Points", f"{comp_info['Points']:.2f}")
-                m_col3.metric("Alpha (A)", comp_cum["A"], help="Includes Paper Alpha + Steel Hits")
-                m_col4.metric("Charlie (C)", comp_cum["C"])
-                m_col5.metric("Delta (D)", comp_cum["D"])
-                m_col6.metric("Mikes (M)", comp_cum["M"])
-                m_col7.metric("Penalties", comp_cum["NS"] + comp_cum["FTE"] + comp_cum["P"], help="NS + FTE + P")
-                m_col8.metric("Total Time", f"{comp_cum['Total Time']}s")
+                    # Display Metrics Cards for Selected Competitor
+                    m_col1, m_col2, m_col3, m_col4, m_col5, m_col6, m_col7, m_col8 = st.columns(8)
+                    m_col1.metric("Rank", f"#{comp_info['Rank']}")
+                    m_col2.metric("Total Points", f"{comp_info['Points']:.2f}")
+                    m_col3.metric("Alpha (A)", comp_cum["A"], help="Includes Paper Alpha + Steel Hits")
+                    m_col4.metric("Charlie (C)", comp_cum["C"])
+                    m_col5.metric("Delta (D)", comp_cum["D"])
+                    m_col6.metric("Mikes (M)", comp_cum["M"])
+                    m_col7.metric("Penalties", comp_cum["NS"] + comp_cum["FTE"] + comp_cum["P"], help="NS + FTE + P")
+                    m_col8.metric("Total Time", f"{comp_cum['Total Time']}s")
 
             # Filtered Export View (Only requested columns)
             export_columns = ["Rank", "%", "Points", "#", "Competitor", "A", "C", "D", "M", "NS", "FTE", "P", "Total Time"]
@@ -1560,17 +1825,12 @@ with main_tab_scoring:
             st.markdown("#### 📥 Export Full Roster Cumulative Breakdown")
             sc_col1, sc_col2 = st.columns(2)
 
-            excel_roster_buffer = io.BytesIO()
-            with pd.ExcelWriter(excel_roster_buffer, engine='xlsxwriter') as writer:
-                df_roster_cum_export.to_excel(writer, sheet_name="Roster_Cumulative_Summary", index=False)
-            excel_roster_data = excel_roster_buffer.getvalue()
-
-            sc_col1.download_button(
-                label="📥 Download Full Roster Cumulative Excel (.xlsx)",
-                data=excel_roster_data,
-                file_name=f"{match_name}_{division}_Full_Roster_Cumulative_Summary.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="dl_roster_cum_excel"
+            pdf_export_button(
+                sc_col1, "📥 Download Full Roster Cumulative PDF (.pdf)",
+                f"{match_name}_{division}_Full_Roster_Cumulative_Summary.pdf",
+                [(match_name, 16, True), ("Full Roster Cumulative Hit & Time Summary", 12, False),
+                 (f"Division: {division} | Date: {match_date.strftime('%B %d, %Y')}", 10, False)],
+                df_roster_cum_export, key="dl_roster_cum_pdf",
             )
 
             word_export_button(
