@@ -4,3 +4,4 @@ numpy
 xlsxwriter
 python-docx
 Pillow
+reportlab
