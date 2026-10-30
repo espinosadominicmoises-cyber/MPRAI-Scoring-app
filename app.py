@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 from datetime import date, datetime, timezone, timedelta
 import hashlib
+import html as _html
 import io
 import json
 from fractions import Fraction
@@ -898,45 +899,97 @@ def build_word_docx(lines, df, logo_left=None, logo_right=None, sections=None, f
 
 
 # ==========================================
+# ON-SCREEN TABLE WITH CENTRED HEADERS
+# ==========================================
+def show_centered_table(df, formats=None):
+    """Standings table for the app screen. st.dataframe draws its headers left/right aligned and
+    cannot be changed, so this renders a plain HTML table with centred headers instead.
+    Numbers stay right-aligned, text stays left-aligned. Colours follow the light/dark theme."""
+    formats = formats or {}
+    numeric = {c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])}
+    head = "".join(f"<th>{_html.escape(str(c))}</th>" for c in df.columns)
+    body = []
+    for row in df.itertuples(index=False, name=None):
+        tds = []
+        for c, v in zip(df.columns, row):
+            if v is None or (isinstance(v, float) and pd.isna(v)):
+                txt = ""
+            elif c in formats:
+                try:
+                    txt = formats[c].format(v)
+                except (ValueError, TypeError):
+                    txt = str(v)
+            else:
+                txt = str(v)
+            tds.append(f'<td class="{"num" if c in numeric else "txt"}">{_html.escape(txt)}</td>')
+        body.append("<tr>" + "".join(tds) + "</tr>")
+    css = (
+        ".ct-wrap{overflow-x:auto;margin:0.25rem 0 1rem 0;border:1px solid rgba(128,128,128,.35);border-radius:8px}"
+        ".ct{border-collapse:collapse;width:100%;font-size:0.875rem;color:inherit}"
+        ".ct th{text-align:center;font-weight:700;padding:8px 12px;background:rgba(128,128,128,.16);"
+        "border-bottom:1px solid rgba(128,128,128,.4);white-space:nowrap}"
+        ".ct td{padding:6px 12px;border-bottom:1px solid rgba(128,128,128,.18);white-space:nowrap}"
+        ".ct td.num{text-align:center;font-variant-numeric:tabular-nums}"
+        ".ct td.txt{text-align:left}"
+        ".ct tr:nth-child(even) td{background:rgba(128,128,128,.07)}"
+        ".ct tr:last-child td{border-bottom:none}"
+    )
+    # One unindented line: Streamlit's markdown turns lines indented 4+ spaces into a code block.
+    html_table = (f"<style>{css}</style><div class='ct-wrap'><table class='ct'><thead><tr>{head}</tr></thead>"
+                  f"<tbody>{''.join(body)}</tbody></table></div>")
+    st.markdown(html_table, unsafe_allow_html=True)
+
+
+# ==========================================
 # INDIVIDUAL PLAYER REPORT  (on screen + PDF + Word)
 # ==========================================
 HIT_ORDER = ["A", "C", "D", "M", "NS", "FTE"]
 HIT_COLORS = {"A": "#2E9E4F",    # green
-              "C": "#F2C230",    # yellow
+              "C": "#2F6FDE",    # blue
               "D": "#F28C28",    # orange
               "M": "#D62728",    # red
-              "NS": "#7B3FA0",   # purple
-              "FTE": "#4A6572"}  # slate
-_DARK_LABEL_ON = {"C", "D"}      # slices light enough to need dark percentage text
+              "NS": "#F2C230",   # yellow
+              "FTE": "#7A808A"}  # grey
+_DARK_LABEL_ON = {"D", "NS"}     # slices light enough to need dark percentage text
 PIE_WIDTH_IN = 5.6               # printed width of the chart in the PDF / Word report
 
 
 def make_hits_pie_png(counts):
-    """Pie of A, C, D, M, NS, FTE only. counts: dict with those keys. Returns PNG bytes (None if no matplotlib)."""
+    """Donut chart of A, C, D, M, NS, FTE only. counts: dict with those keys.
+    Returns PNG bytes (None if no matplotlib)."""
     if not HAS_MPL:
         return None
     total = sum(int(counts.get(k, 0)) for k in HIT_ORDER)
-    fig = Figure(figsize=(6.6, 3.1), dpi=200)
+    fig = Figure(figsize=(6.6, 3.4), dpi=200)
     ax = fig.subplots()
     if total == 0:
         ax.text(0.5, 0.5, "No hits recorded yet", ha="center", va="center", fontsize=13, color="#555555")
         ax.axis("off")
     else:
         present = [k for k in HIT_ORDER if counts.get(k, 0) > 0]
+        values = [counts[k] for k in present]
+        cols = [HIT_COLORS[k] for k in present]
+        ring = 0.40                                    # thickness of the donut (1.0 = full pie)
+        # thin, faded outer ring for a finished, "gauge" look
+        ax.pie(values, colors=cols, radius=1.1, startangle=90, counterclock=False,
+               wedgeprops={"width": 0.05, "edgecolor": "white", "linewidth": 1.2, "alpha": 0.40})
         _, _, autotexts = ax.pie(
-            [counts[k] for k in present], colors=[HIT_COLORS[k] for k in present],
-            startangle=90, counterclock=False, pctdistance=0.72,
-            autopct=lambda pct: f"{pct:.0f}%" if pct >= 4 else "",
-            wedgeprops={"edgecolor": "white", "linewidth": 1.6},
+            values, colors=cols, radius=1.0, startangle=90, counterclock=False,
+            pctdistance=1.0 - ring / 2,
+            autopct=lambda pct: f"{pct:.0f}%" if pct >= 6 else "",
+            wedgeprops={"width": ring, "edgecolor": "white", "linewidth": 2.6},
             textprops={"fontsize": 9, "fontweight": "bold"},
         )
         for k, t in zip(present, autotexts):
             t.set_color("#222222" if k in _DARK_LABEL_ON else "white")
+        # total in the hole
+        ax.text(0, 0.07, f"{total}", ha="center", va="center", fontsize=26, fontweight="bold", color="#222222")
+        ax.text(0, -0.24, "TOTAL HITS", ha="center", va="center", fontsize=8, color="#777777")
         handles = [
             Patch(facecolor=HIT_COLORS[k], label=f"{k}:  {int(counts.get(k, 0))}  ({counts.get(k, 0) / total * 100:.1f}%)")
             for k in HIT_ORDER
         ]
-        ax.legend(handles=handles, loc="center left", bbox_to_anchor=(1.04, 0.5), frameon=False,
+        ax.legend(handles=handles, loc="center left", bbox_to_anchor=(1.12, 0.5), frameon=False,
                   fontsize=10, title="Hits", title_fontsize=11, labelspacing=0.9, handlelength=1.4)
         ax.set_aspect("equal")
     buf = io.BytesIO()
@@ -1973,13 +2026,13 @@ with main_tab_scoring:
             # Stage Display Table (UI view)
             df_stage_view = df_stage[["Rank", "Stage %", "Stage Points", "#", "Competitor", "Cat", "Reg", "Cls", "Tag", "ICS", "Raw Points", "Raw Time", "Hit Factor", "Power"]]
 
-            st.dataframe(df_stage_view.style.format({
+            show_centered_table(df_stage_view, {
                 "Stage %": "{:.2f}%",
                 "Stage Points": "{:.4f}",
                 "Raw Points": "{:.4f}",
                 "Raw Time": "{:.2f}",
                 "Hit Factor": "{:.4f}"
-            }), use_container_width=True, hide_index=True)
+            })
 
             # Dedicated Word Export view
             df_stage_word = df_stage[["Rank", "Stage %", "Stage Points", "#", "Competitor", "Cat", "Reg", "Cls", "Tag", "ICS", "Power"]].copy()
@@ -2002,7 +2055,20 @@ with main_tab_scoring:
                 df_stage_word, key=f"dl_word_{s_name}",
             )
 
-            # --- Inline Hit Breakdown Inspection ---
+            # --- Inline Hit Breakdown Inspection (with its exports inside) ---
+            # Full-roster hit breakdown for this stage (A includes steel hits, like the cumulative export)
+            df_stage_hits = pd.DataFrame({
+                "Rank": df_stage["Rank"],
+                "Stage %": df_stage["Stage %"].round(2).astype(str) + "%",
+                "Stage Points": df_stage["Stage Points"].round(4),
+                "#": df_stage["#"],
+                "Competitor": df_stage["Competitor"],
+                "A": df_stage["A"] + df_stage["Steel"],
+                "C": df_stage["C"], "D": df_stage["D"], "M": df_stage["M"],
+                "NS": df_stage["NS"], "FTE": df_stage["FTE"], "P": df_stage["Proc"],
+                "Time": df_stage["Raw Time"].map(lambda t: f"{t:.2f}"),
+            })
+
             with st.expander(f"🔍 View Hit Breakdown ({s_name})"):
                 if not df_stage.empty:
                     inspect_shooter = st.selectbox("Select Competitor to Inspect Hits", options=df_stage["Competitor"].tolist(), key=f"inspect_{s_name}")
@@ -2018,32 +2084,20 @@ with main_tab_scoring:
                     hb_col7.metric("FTE", int(row_data["FTE"]))
                     hb_col8.metric("Procedural", int(row_data["Proc"]))
 
-            # Full-roster hit breakdown for this stage (A includes steel hits, like the cumulative export)
-            df_stage_hits = pd.DataFrame({
-                "Rank": df_stage["Rank"],
-                "Stage %": df_stage["Stage %"].round(2).astype(str) + "%",
-                "Stage Points": df_stage["Stage Points"].round(4),
-                "#": df_stage["#"],
-                "Competitor": df_stage["Competitor"],
-                "A": df_stage["A"] + df_stage["Steel"],
-                "C": df_stage["C"], "D": df_stage["D"], "M": df_stage["M"],
-                "NS": df_stage["NS"], "FTE": df_stage["FTE"], "P": df_stage["Proc"],
-                "Time": df_stage["Raw Time"].map(lambda t: f"{t:.2f}"),
-            })
-            st.markdown("#### 📥 Export Hit Breakdown")
-            col_hb1, col_hb2 = st.columns(2)
-            hb_lines = [(match_name, 16, True), (f"{division} ({s_name}) - Hit Breakdown", 12, False),
-                        (f"Date: {match_date.strftime('%B %d, %Y')}", 10, False)]
-            pdf_export_button(
-                col_hb1, "📥 Download Hit Breakdown PDF (.pdf)",
-                f"{match_name}_{division}_{s_name}_Hit_Breakdown.pdf",
-                hb_lines, df_stage_hits, key=f"dl_pdf_hits_{s_name}",
-            )
-            word_export_button(
-                col_hb2, "📥 Download Hit Breakdown Word (.docx)",
-                f"{match_name}_{division}_{s_name}_Hit_Breakdown.docx",
-                hb_lines, df_stage_hits, key=f"dl_word_hits_{s_name}",
-            )
+                st.markdown("#### 📥 Export Hit Breakdown")
+                col_hb1, col_hb2 = st.columns(2)
+                hb_lines = [(match_name, 16, True), (f"{division} ({s_name}) - Hit Breakdown", 12, False),
+                            (f"Date: {match_date.strftime('%B %d, %Y')}", 10, False)]
+                pdf_export_button(
+                    col_hb1, "📥 Download Hit Breakdown PDF (.pdf)",
+                    f"{match_name}_{division}_{s_name}_Hit_Breakdown.pdf",
+                    hb_lines, df_stage_hits, key=f"dl_pdf_hits_{s_name}",
+                )
+                word_export_button(
+                    col_hb2, "📥 Download Hit Breakdown Word (.docx)",
+                    f"{match_name}_{division}_{s_name}_Hit_Breakdown.docx",
+                    hb_lines, df_stage_hits, key=f"dl_word_hits_{s_name}",
+                )
 
             for _, row in df_stage.iterrows():
                 overall_match_points[row["Competitor"]] += row["Pts_exact"]
@@ -2068,10 +2122,10 @@ with main_tab_scoring:
 
             df_overall_display = df_overall[["Rank", "%", "Points", "#", "Competitor", "Cat", "Reg", "Cls", "Tag", "ICS", "Power"]]
 
-            st.dataframe(df_overall_display.style.format({
+            show_centered_table(df_overall_display, {
                 "Points": "{:.4f}",
                 "%": "{:.2f}%"
-            }), use_container_width=True, hide_index=True)
+            })
 
             df_overall_print = df_overall[["Rank", "%", "Points", "#", "Competitor", "Cat", "Reg", "Cls", "Tag", "ICS", "Power"]].copy()
             df_overall_print["%"] = df_overall_print["%"].round(2).astype(str) + "%"
@@ -2142,6 +2196,10 @@ with main_tab_scoring:
 
             df_roster_cum = pd.DataFrame(roster_cum_records)
 
+            # Filtered Export View (Only requested columns)
+            export_columns = ["Rank", "%", "Points", "#", "Competitor", "A", "C", "D", "M", "NS", "FTE", "P", "Total Time"]
+            df_roster_cum_export = df_roster_cum[export_columns].copy()
+
             with st.expander("🔍 View Cumulative Hit Breakdown"):
                 ranked_competitors = df_overall["Competitor"].tolist()
                 selected_comp_inspect = st.selectbox(
@@ -2163,6 +2221,26 @@ with main_tab_scoring:
                     m_col6.metric("Mikes (M)", comp_cum["M"])
                     m_col7.metric("Penalties", comp_cum["NS"] + comp_cum["FTE"] + comp_cum["P"], help="NS + FTE + P")
                     m_col8.metric("Total Time", f"{comp_cum['Total Time']}s")
+
+                # Full Roster Cumulative Breakdown Export Section
+                st.markdown("#### 📥 Export Full Roster Cumulative Breakdown")
+                sc_col1, sc_col2 = st.columns(2)
+
+                pdf_export_button(
+                    sc_col1, "📥 Download Full Roster Cumulative PDF (.pdf)",
+                    f"{match_name}_{division}_Full_Roster_Cumulative_Summary.pdf",
+                    [(match_name, 16, True), ("Full Roster Cumulative Hit & Time Summary", 12, False),
+                     (f"Division: {division} | Date: {match_date.strftime('%B %d, %Y')}", 10, False)],
+                    df_roster_cum_export, key="dl_roster_cum_pdf",
+                )
+
+                word_export_button(
+                    sc_col2, "📥 Download Full Roster Cumulative Word (.docx)",
+                    f"{match_name}_{division}_Full_Roster_Cumulative_Summary.docx",
+                    [(match_name, 16, True), ("Full Roster Cumulative Hit & Time Summary", 12, False),
+                     (f"Division: {division} | Date: {match_date.strftime('%B %d, %Y')}", 10, False)],
+                    df_roster_cum_export, key="dl_roster_cum_word",
+                )
 
             with st.expander("👤 View Individual Player Report"):
                 report_name = st.selectbox(
@@ -2220,28 +2298,5 @@ with main_tab_scoring:
                         pr_lines, None, key="dl_player_word", sections=rep["sections"], footer_df=rep["facts_df"],
                     )
 
-            # Filtered Export View (Only requested columns)
-            export_columns = ["Rank", "%", "Points", "#", "Competitor", "A", "C", "D", "M", "NS", "FTE", "P", "Total Time"]
-            df_roster_cum_export = df_roster_cum[export_columns].copy()
-
-            # Full Roster Cumulative Breakdown Export Section
-            st.markdown("#### 📥 Export Full Roster Cumulative Breakdown")
-            sc_col1, sc_col2 = st.columns(2)
-
-            pdf_export_button(
-                sc_col1, "📥 Download Full Roster Cumulative PDF (.pdf)",
-                f"{match_name}_{division}_Full_Roster_Cumulative_Summary.pdf",
-                [(match_name, 16, True), ("Full Roster Cumulative Hit & Time Summary", 12, False),
-                 (f"Division: {division} | Date: {match_date.strftime('%B %d, %Y')}", 10, False)],
-                df_roster_cum_export, key="dl_roster_cum_pdf",
-            )
-
-            word_export_button(
-                sc_col2, "📥 Download Full Roster Cumulative Word (.docx)",
-                f"{match_name}_{division}_Full_Roster_Cumulative_Summary.docx",
-                [(match_name, 16, True), ("Full Roster Cumulative Hit & Time Summary", 12, False),
-                 (f"Division: {division} | Date: {match_date.strftime('%B %d, %Y')}", 10, False)],
-                df_roster_cum_export, key="dl_roster_cum_word",
-            )
         else:
             st.warning("No active competitors available for overall standings.")
