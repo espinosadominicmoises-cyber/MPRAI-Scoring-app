@@ -33,6 +33,15 @@ try:
     HAS_PDF = True
 except ImportError:          # the app still runs; only PDF export is unavailable
     HAS_PDF = False
+try:
+    import matplotlib
+    matplotlib.rcParams["font.sans-serif"] = ["Arial", "Liberation Sans", "DejaVu Sans"]
+    matplotlib.rcParams["font.family"] = "sans-serif"
+    from matplotlib.figure import Figure
+    from matplotlib.patches import Patch
+    HAS_MPL = True
+except ImportError:          # the app still runs; only the pie chart is unavailable
+    HAS_MPL = False
 import streamlit.components.v1 as components
 
 # ==========================================
@@ -724,7 +733,7 @@ def _export_footer_lines(lines, df):
     return line1, line2
 
 
-def build_word_docx(lines, df, logo_left=None, logo_right=None):
+def build_word_docx(lines, df, logo_left=None, logo_right=None, sections=None, footer_df=None):
     """Build a real .docx: logos + title lines at the top, then the table.
     lines: list of (text, point_size, bold)."""
     doc = Document()
@@ -770,73 +779,77 @@ def build_word_docx(lines, df, logo_left=None, logo_right=None):
     else:
         add_lines(doc, WD_ALIGN_PARAGRAPH.LEFT)
     doc.add_paragraph().paragraph_format.space_after = Pt(6)
+    if sections:
+        _docx_add_sections(doc, sections, usable_in)
 
-    # ---- data table
-    # Alignment by column position (applies to the header cell too):
-    # cols 2,3,4 right | col 5 left | everything else (1, 6, 7, 8, ...) centered
-    right_idx, left_idx = {1, 2, 3}, {4}
-    cols = list(df.columns)
-    rows = [[_fmt_cell(v) for v in r] for r in df.itertuples(index=False, name=None)]
-    fit_w = [
-        max([_text_width_in(c, True)] + [_text_width_in(r[i], False) for r in rows]) + CELL_PAD_IN
-        for i, c in enumerate(cols)
-    ]
-    col_w = list(fit_w)                       # every column fits its own contents...
-    if len(cols) > 4:                         # ...except column 5 (Competitor), which absorbs the leftover width
-        col_w[4] = max(usable_in - (sum(fit_w) - fit_w[4]), 1.0)
+    if df is not None:
+        # ---- data table
+        # Alignment by column position (applies to the header cell too):
+        # cols 2,3,4 right | col 5 left | everything else (1, 6, 7, 8, ...) centered
+        right_idx, left_idx = {1, 2, 3}, {4}
+        cols = list(df.columns)
+        rows = [[_fmt_cell(v) for v in r] for r in df.itertuples(index=False, name=None)]
+        fit_w = [
+            max([_text_width_in(c, True)] + [_text_width_in(r[i], False) for r in rows]) + CELL_PAD_IN
+            for i, c in enumerate(cols)
+        ]
+        col_w = list(fit_w)                       # every column fits its own contents...
+        if len(cols) > 4:                         # ...except column 5 (Competitor), which absorbs the leftover width
+            col_w[4] = max(usable_in - (sum(fit_w) - fit_w[4]), 1.0)
 
-    table = doc.add_table(rows=1, cols=len(cols))
-    table.style = "Table Grid"
-    table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    table.autofit = False
-    for col, w in zip(table.columns, col_w):
-        col.width = Inches(w)              # sets the table grid so column widths actually apply
+        table = doc.add_table(rows=1, cols=len(cols))
+        table.style = "Table Grid"
+        table.alignment = WD_TABLE_ALIGNMENT.CENTER
+        table.autofit = False
+        for col, w in zip(table.columns, col_w):
+            col.width = Inches(w)              # sets the table grid so column widths actually apply
 
-    def fill(cell, text, width, align, bold=False, shade=None):
-        cell.width = Inches(width)
-        para = cell.paragraphs[0]
-        para.style = doc.styles["No Spacing"]     # Word's "No Spacing" paragraph style
-        para.alignment = align
-        run = para.add_run(text)
-        run.font.size, run.font.name, run.bold = Pt(TABLE_FONT_PT), "Arial", bold
-        mark = OxmlElement("w:rPr")           # paragraph-mark formatting, so blank cells stay as short as the rest
-        for tag in ("w:rFonts", "w:sz", "w:szCs"):
-            el = OxmlElement(tag)
-            if tag == "w:rFonts":
-                el.set(qn("w:ascii"), "Arial")
-                el.set(qn("w:hAnsi"), "Arial")
-            else:
-                el.set(qn("w:val"), str(int(round(TABLE_FONT_PT * 2))))   # Word stores sizes in half-points
-            mark.append(el)
-        para._p.get_or_add_pPr().append(mark)
-        if shade:
-            shd = OxmlElement("w:shd")
-            shd.set(qn("w:val"), "clear")
-            shd.set(qn("w:color"), "auto")
-            shd.set(qn("w:fill"), shade)
-            cell._tc.get_or_add_tcPr().append(shd)
+        def fill(cell, text, width, align, bold=False, shade=None):
+            cell.width = Inches(width)
+            para = cell.paragraphs[0]
+            para.style = doc.styles["No Spacing"]     # Word's "No Spacing" paragraph style
+            para.alignment = align
+            run = para.add_run(text)
+            run.font.size, run.font.name, run.bold = Pt(TABLE_FONT_PT), "Arial", bold
+            mark = OxmlElement("w:rPr")           # paragraph-mark formatting, so blank cells stay as short as the rest
+            for tag in ("w:rFonts", "w:sz", "w:szCs"):
+                el = OxmlElement(tag)
+                if tag == "w:rFonts":
+                    el.set(qn("w:ascii"), "Arial")
+                    el.set(qn("w:hAnsi"), "Arial")
+                else:
+                    el.set(qn("w:val"), str(int(round(TABLE_FONT_PT * 2))))   # Word stores sizes in half-points
+                mark.append(el)
+            para._p.get_or_add_pPr().append(mark)
+            if shade:
+                shd = OxmlElement("w:shd")
+                shd.set(qn("w:val"), "clear")
+                shd.set(qn("w:color"), "auto")
+                shd.set(qn("w:fill"), shade)
+                cell._tc.get_or_add_tcPr().append(shd)
 
-    def align_for(i):
-        if i in left_idx:
-            return WD_ALIGN_PARAGRAPH.LEFT
-        if i in right_idx:
-            return WD_ALIGN_PARAGRAPH.RIGHT
-        return WD_ALIGN_PARAGRAPH.CENTER
+        def align_for(i):
+            if i in left_idx:
+                return WD_ALIGN_PARAGRAPH.LEFT
+            if i in right_idx:
+                return WD_ALIGN_PARAGRAPH.RIGHT
+            return WD_ALIGN_PARAGRAPH.CENTER
 
-    for i, c in enumerate(cols):
-        fill(table.rows[0].cells[i], str(c), col_w[i], align_for(i), bold=True, shade="F2F2F2")
-    repeat = OxmlElement("w:tblHeader")           # repeat header row on every printed page
-    repeat.set(qn("w:val"), "true")
-    table.rows[0]._tr.get_or_add_trPr().append(repeat)
+        for i, c in enumerate(cols):
+            fill(table.rows[0].cells[i], str(c), col_w[i], align_for(i), bold=True, shade="F2F2F2")
+        repeat = OxmlElement("w:tblHeader")           # repeat header row on every printed page
+        repeat.set(qn("w:val"), "true")
+        table.rows[0]._tr.get_or_add_trPr().append(repeat)
 
-    for r in rows:
-        cells = table.add_row().cells
-        for i, v in enumerate(r):
-            fill(cells[i], v, col_w[i], align_for(i))
+        for r in rows:
+            cells = table.add_row().cells
+            for i, v in enumerate(r):
+                fill(cells[i], v, col_w[i], align_for(i))
+
 
     # ---- footer (bottom-left): export date/time + report info, page numbers on the right
     sec.footer_distance = Inches(0.3)
-    f1, f2 = _export_footer_lines(lines, df)
+    f1, f2 = _export_footer_lines(lines, footer_df if footer_df is not None else df)
     foot = sec.footer
     foot.is_linked_to_previous = False
     p1 = foot.paragraphs[0]
@@ -884,14 +897,342 @@ def build_word_docx(lines, df, logo_left=None, logo_right=None):
     return buf.getvalue()
 
 
-def word_export_button(container, label, file_name, lines, df, key=None):
+# ==========================================
+# INDIVIDUAL PLAYER REPORT  (on screen + PDF + Word)
+# ==========================================
+HIT_ORDER = ["A", "C", "D", "M", "NS", "FTE"]
+HIT_COLORS = {"A": "#2E9E4F",    # green
+              "C": "#F2C230",    # yellow
+              "D": "#F28C28",    # orange
+              "M": "#D62728",    # red
+              "NS": "#7B3FA0",   # purple
+              "FTE": "#4A6572"}  # slate
+_DARK_LABEL_ON = {"C", "D"}      # slices light enough to need dark percentage text
+PIE_WIDTH_IN = 5.6               # printed width of the chart in the PDF / Word report
+
+
+def make_hits_pie_png(counts):
+    """Pie of A, C, D, M, NS, FTE only. counts: dict with those keys. Returns PNG bytes (None if no matplotlib)."""
+    if not HAS_MPL:
+        return None
+    total = sum(int(counts.get(k, 0)) for k in HIT_ORDER)
+    fig = Figure(figsize=(6.6, 3.1), dpi=200)
+    ax = fig.subplots()
+    if total == 0:
+        ax.text(0.5, 0.5, "No hits recorded yet", ha="center", va="center", fontsize=13, color="#555555")
+        ax.axis("off")
+    else:
+        present = [k for k in HIT_ORDER if counts.get(k, 0) > 0]
+        _, _, autotexts = ax.pie(
+            [counts[k] for k in present], colors=[HIT_COLORS[k] for k in present],
+            startangle=90, counterclock=False, pctdistance=0.72,
+            autopct=lambda pct: f"{pct:.0f}%" if pct >= 4 else "",
+            wedgeprops={"edgecolor": "white", "linewidth": 1.6},
+            textprops={"fontsize": 9, "fontweight": "bold"},
+        )
+        for k, t in zip(present, autotexts):
+            t.set_color("#222222" if k in _DARK_LABEL_ON else "white")
+        handles = [
+            Patch(facecolor=HIT_COLORS[k], label=f"{k}:  {int(counts.get(k, 0))}  ({counts.get(k, 0) / total * 100:.1f}%)")
+            for k in HIT_ORDER
+        ]
+        ax.legend(handles=handles, loc="center left", bbox_to_anchor=(1.04, 0.5), frameon=False,
+                  fontsize=10, title="Hits", title_fontsize=11, labelspacing=0.9, handlelength=1.4)
+        ax.set_aspect("equal")
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", bbox_inches="tight", facecolor="white")
+    return buf.getvalue()
+
+
+def build_player_report(name, df_overall, stage_tables, stage_names, scores):
+    """Everything about one competitor, in one place, so the screen, PDF and Word report all agree."""
+    me = df_overall[df_overall["Competitor"] == name].iloc[0]
+    n_players = len(df_overall)
+    tied = int((df_overall["Rank"] == me["Rank"]).sum()) > 1
+    leader_pts = float(df_overall["Points"].max())
+
+    stage_rows, scored = [], []
+    tot = {k: 0 for k in ["A", "C", "D", "M", "NS", "FTE", "P"]}
+    tot_time, tot_pts = 0.0, 0.0
+    for sname in stage_names:
+        t = stage_tables.get(sname)
+        rec = scores.get((sname, name))
+        mine = t[t["Competitor"] == name] if t is not None else None
+        if mine is None or mine.empty or not rec:
+            stage_rows.append([sname, "-", "-", "-", "-", "-", "0", "0", "0", "0", "0", "0", "0"])
+            continue
+        r = mine.iloc[0]
+        a_all = int(r["A"]) + int(r["Steel"])
+        hits = {"A": a_all, "C": int(r["C"]), "D": int(r["D"]), "M": int(r["M"]),
+                "NS": int(r["NS"]), "FTE": int(r["FTE"]), "P": int(r["Proc"])}
+        for k in tot:
+            tot[k] += hits[k]
+        tot_time += float(r["Raw Time"])
+        tot_pts += float(r["Stage Points"])
+        if rec.get("DNF", False):
+            lead = ["DNF", f"{float(r['Stage Points']):.4f}", "0.00%", "0.0000"]
+        elif float(rec.get("time", 0)) <= 0:
+            lead = ["no time", f"{float(r['Stage Points']):.4f}", "0.00%", "0.0000"]
+        else:
+            lead = [f"{int(r['Rank'])}/{len(t)}", f"{float(r['Stage Points']):.4f}",
+                    f"{float(r['Stage %']):.2f}%", f"{float(r['Hit Factor']):.4f}"]
+            scored.append({"stage": sname, "rank": int(r["Rank"]), "pct": float(r["Stage %"]), "hf": float(r["Hit Factor"])})
+        stage_rows.append([sname] + lead + [f"{float(r['Raw Time']):.2f}"] + [str(hits[k]) for k in ["A", "C", "D", "M", "NS", "FTE", "P"]])
+
+    stage_rows.append(["Total", "", f"{tot_pts:.4f}", f"{float(me['%']):.2f}%", "", f"{tot_time:.2f}"]
+                      + [str(tot[k]) for k in ["A", "C", "D", "M", "NS", "FTE", "P"]])
+    stage_header = ["Stage", "Rank", "Pts", "%", "HF", "Time", "A", "C", "D", "M", "NS", "FTE", "P"]
+
+    # ---- derived statistics
+    on_target, rounds = tot["A"] + tot["C"] + tot["D"], tot["A"] + tot["C"] + tot["D"] + tot["M"]
+    pct = lambda x, y: f"{x / y * 100:.1f}%" if y else "-"
+    best = max(scored, key=lambda x: x["pct"]) if scored else None
+    worst = min(scored, key=lambda x: x["pct"]) if scored else None
+    n_scored = len(scored)
+    highlights = [
+        ("Alpha Rate (A of A+C+D+M)", pct(tot["A"], rounds)),
+        ("Hit Rate (A+C+D of A+C+D+M)", pct(on_target, rounds)),
+        ("Penalties (M+NS+FTE+P)", str(tot["M"] + tot["NS"] + tot["FTE"] + tot["P"])),
+        ("Penalty Points Deducted", str(10 * (tot["M"] + tot["NS"] + tot["FTE"] + tot["P"]))),
+        ("Stages Won", str(sum(1 for x in scored if x["rank"] == 1))),
+        ("Podium Finishes (Top 3)", str(sum(1 for x in scored if x["rank"] <= 3))),
+        ("Average Stage %", f"{sum(x['pct'] for x in scored) / n_scored:.2f}%" if n_scored else "-"),
+        ("Average Hit Factor", f"{sum(x['hf'] for x in scored) / n_scored:.4f}" if n_scored else "-"),
+        ("Best Stage", f"{best['stage']} ({best['pct']:.2f}%)" if best else "-"),
+        ("Weakest Stage", f"{worst['stage']} ({worst['pct']:.2f}%)" if worst else "-"),
+    ]
+    profile = [
+        ("Competitor", name), ("Competitor #", str(me["#"])),
+        ("Category", me["Cat"] or "-"), ("Class", me["Cls"] or "-"),
+        ("Region", me["Reg"] or "-"), ("Tag", me["Tag"] or "-"),
+        ("ICS", me["ICS"] or "-"), ("Power Factor", me["Power"]),
+    ]
+    overall = [
+        ("Overall Rank", f"{int(me['Rank'])} of {n_players}" + (" (tied)" if tied else "")),
+        ("Total Points", f"{float(me['Points']):.4f}"),
+        ("% of 1st Place", f"{float(me['%']):.2f}%"),
+        ("Points Behind 1st", f"{leader_pts - float(me['Points']):.4f}"),
+        ("Stages Scored", f"{n_scored} of {len(stage_names)}"),
+        ("Total Time", f"{tot_time:.2f} s"),
+    ]
+    hit_total = sum(tot[k] for k in HIT_ORDER)
+    hit_header = ["A", "C", "D", "M", "NS", "FTE", "P"]
+    hit_rows = [[str(tot[k]) for k in hit_header],
+                [pct(tot[k], hit_total) if k != "P" else "-" for k in hit_header]]
+    png = make_hits_pie_png({k: tot[k] for k in HIT_ORDER})
+
+    sections = [
+        ("heading", "Competitor Profile"), ("kv", profile, 2),
+        ("heading", "Overall Result"), ("kv", overall, 2),
+        ("heading", "Hit Summary"),
+        ("table", {"header": hit_header, "rows": [["%s" % c for c in r] for r in hit_rows], "aligns": ["C"] * 7}),
+        ("note", "A includes steel hits. The second row shows each count as a share of A + C + D + M + NS + FTE. "
+                 "P = procedural penalties (counted here, not charted)."),
+    ]
+    if png:
+        sections += [("heading", "Hit Distribution"), ("image", png, PIE_WIDTH_IN),
+                     ("note", "Pie shows hits only: Alpha, Charlie, Delta, Mike, No-Shoot and Failure to Engage.")]
+    sections += [
+        ("heading", "Stage-by-Stage Breakdown"),
+        ("table", {"header": stage_header, "rows": stage_rows, "bold_last": True, "flex": 0,
+                   "aligns": ["L", "C", "R", "R", "R", "R", "C", "C", "C", "C", "C", "C", "C"]}),
+        ("note", "Rank = placing on that stage (of all active competitors). Pts = stage points. % = share of the stage winner's "
+                 "hit factor (Total row: share of the overall leader's points). HF = hit factor."),
+        ("heading", "Performance Highlights"), ("kv", highlights, 2),
+    ]
+
+    # flat copy of every figure in the report; its fingerprint goes in the footer like the other exports
+    facts = ([("Profile", a, b) for a, b in profile] + [("Overall", a, b) for a, b in overall]
+             + [("Hits", h, str(tot[h])) for h in hit_header]
+             + [("Stage", r[0], " | ".join(r[1:])) for r in stage_rows]
+             + [("Highlight", a, b) for a, b in highlights])
+    return {
+        "name": name, "rank": int(me["Rank"]), "n_players": n_players, "tied": tied,
+        "points": float(me["Points"]), "percent": float(me["%"]), "behind": leader_pts - float(me["Points"]),
+        "totals": tot, "total_time": tot_time, "png": png, "highlights": highlights,
+        "stage_header": stage_header, "stage_rows": stage_rows, "sections": sections,
+        "facts_df": pd.DataFrame(facts, columns=["Section", "Field", "Value"]),
+        "num": int(me["#"]),
+    }
+
+
+# ---------- generic section tables shared by the Word and PDF renderers ----------
+def _section_to_spec(sec):
+    """("kv", pairs, per_row) or ("table", spec) -> one table spec."""
+    if sec[0] == "kv":
+        pairs, per_row = sec[1], sec[2]
+        rows = []
+        for i in range(0, len(pairs), per_row):
+            r = []
+            for lab, val in pairs[i:i + per_row]:
+                r += [str(lab), str(val)]
+            rows.append(r + [""] * (2 * per_row - len(r)))
+        return {"header": None, "rows": rows, "aligns": ["L"] * (2 * per_row),
+                "label_cols": set(range(0, 2 * per_row, 2))}
+    return sec[1]
+
+
+def _section_col_widths(spec, usable_in):
+    header, rows = spec.get("header"), spec["rows"]
+    n = len(header) if header else len(rows[0])
+    labels, bold_last = spec.get("label_cols", set()), spec.get("bold_last", False)
+    fit = []
+    for i in range(n):
+        cells = [_text_width_in(header[i], True)] if header else []
+        cells += [_text_width_in(r[i], (i in labels) or (bold_last and ri == len(rows) - 1)) for ri, r in enumerate(rows)]
+        fit.append(max(cells + [0.0]) + CELL_PAD_IN)
+    flex = spec.get("flex")
+    if flex is not None:
+        w = list(fit)
+        w[flex] = max(usable_in - (sum(fit) - fit[flex]), 1.0)
+    else:
+        targets = [i for i in range(n) if i not in labels] or list(range(n))
+        extra = max(usable_in - sum(fit), 0.0) / len(targets)
+        w = [fit[i] + (extra if i in targets else 0.0) for i in range(n)]
+    if sum(w) > usable_in:
+        w = [x * usable_in / sum(w) for x in w]
+    return w
+
+
+def _docx_cell(doc, cell, text, width_in, align, bold=False, shade=None):
+    cell.width = Inches(width_in)
+    para = cell.paragraphs[0]
+    para.style = doc.styles["No Spacing"]
+    para.alignment = align
+    run = para.add_run(text)
+    run.font.size, run.font.name, run.bold = Pt(TABLE_FONT_PT), "Arial", bold
+    mark = OxmlElement("w:rPr")           # paragraph mark sized like the text, so rows stay compact
+    for tag in ("w:rFonts", "w:sz", "w:szCs"):
+        el = OxmlElement(tag)
+        if tag == "w:rFonts":
+            el.set(qn("w:ascii"), "Arial")
+            el.set(qn("w:hAnsi"), "Arial")
+        else:
+            el.set(qn("w:val"), str(int(round(TABLE_FONT_PT * 2))))
+        mark.append(el)
+    para._p.get_or_add_pPr().append(mark)
+    if shade:
+        shd = OxmlElement("w:shd")
+        shd.set(qn("w:val"), "clear")
+        shd.set(qn("w:color"), "auto")
+        shd.set(qn("w:fill"), shade)
+        cell._tc.get_or_add_tcPr().append(shd)
+
+
+def _docx_add_sections(doc, sections, usable_in):
+    from docx.shared import RGBColor
+    amap = {"L": WD_ALIGN_PARAGRAPH.LEFT, "C": WD_ALIGN_PARAGRAPH.CENTER, "R": WD_ALIGN_PARAGRAPH.RIGHT}
+    for sec in sections:
+        kind = sec[0]
+        if kind == "heading":
+            para = doc.add_paragraph()
+            para.paragraph_format.space_before = Pt(10)
+            para.paragraph_format.space_after = Pt(3)
+            para.paragraph_format.keep_with_next = True
+            run = para.add_run(sec[1])
+            run.font.size, run.font.name, run.bold = Pt(11), "Arial", True
+        elif kind in ("kv", "table"):
+            spec = _section_to_spec(sec)
+            widths = _section_col_widths(spec, usable_in)
+            header, rows, aligns = spec.get("header"), spec["rows"], spec["aligns"]
+            labels, bold_last = spec.get("label_cols", set()), spec.get("bold_last", False)
+            table = doc.add_table(rows=0, cols=len(widths))
+            table.style = "Table Grid"
+            table.alignment = WD_TABLE_ALIGNMENT.CENTER
+            table.autofit = False
+            for col, w in zip(table.columns, widths):
+                col.width = Inches(w)
+            if header:
+                cells = table.add_row().cells
+                for i, h in enumerate(header):
+                    _docx_cell(doc, cells[i], str(h), widths[i], amap[aligns[i]], bold=True, shade="F2F2F2")
+                repeat = OxmlElement("w:tblHeader")
+                repeat.set(qn("w:val"), "true")
+                table.rows[0]._tr.get_or_add_trPr().append(repeat)
+            for ri, r in enumerate(rows):
+                cells = table.add_row().cells
+                for i, v in enumerate(r):
+                    is_label = i in labels
+                    _docx_cell(doc, cells[i], str(v), widths[i], amap[aligns[i]],
+                               bold=is_label or (bold_last and ri == len(rows) - 1),
+                               shade="F2F2F2" if is_label else None)
+            if len(table.rows) <= 25:          # short tables stay on one page instead of splitting
+                for row in table.rows[:-1]:
+                    for c in row.cells:
+                        for para in c.paragraphs:
+                            para.paragraph_format.keep_with_next = True
+        elif kind == "note":
+            para = doc.add_paragraph()
+            para.paragraph_format.space_before = Pt(2)
+            run = para.add_run(sec[1])
+            run.font.size, run.font.name, run.italic = Pt(7.5), "Arial", True
+            run.font.color.rgb = RGBColor(0x55, 0x55, 0x55)
+        elif kind == "image":
+            png, width_in = sec[1], sec[2]
+            para = doc.add_paragraph()
+            para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            para.paragraph_format.keep_with_next = True
+            para.add_run().add_picture(io.BytesIO(png), width=Inches(min(width_in, usable_in)))
+
+
+def _pdf_sections(sections, usable_in, reg, bold):
+    from reportlab.platypus import KeepTogether
+    flow = []
+    amap = {"L": TA_LEFT, "C": TA_CENTER, "R": 2}      # 2 = reportlab's TA_RIGHT
+    for sec in sections:
+        kind = sec[0]
+        if kind == "heading":
+            flow.append(Paragraph(_xml_escape(sec[1]), ParagraphStyle(
+                "sec_h", fontName=bold, fontSize=11, leading=13, spaceBefore=10, spaceAfter=3, keepWithNext=True)))
+        elif kind in ("kv", "table"):
+            spec = _section_to_spec(sec)
+            widths = _section_col_widths(spec, usable_in)
+            header, rows, aligns = spec.get("header"), spec["rows"], spec["aligns"]
+            labels, bold_last = spec.get("label_cols", set()), spec.get("bold_last", False)
+
+            def cell(text, i, is_bold):
+                return Paragraph(_xml_escape(str(text)), ParagraphStyle(
+                    f"c{i}{int(is_bold)}", fontName=bold if is_bold else reg, fontSize=TABLE_FONT_PT,
+                    leading=TABLE_FONT_PT * 1.15, alignment=amap[aligns[i]]))
+
+            data = []
+            if header:
+                data.append([cell(h, i, True) for i, h in enumerate(header)])
+            for ri, r in enumerate(rows):
+                last = bold_last and ri == len(rows) - 1
+                data.append([cell(v, i, (i in labels) or last) for i, v in enumerate(r)])
+            t = Table(data, colWidths=[w * inch for w in widths], repeatRows=1 if header else 0)
+            style = [
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.black), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0.08 * inch), ("RIGHTPADDING", (0, 0), (-1, -1), 0.08 * inch),
+                ("TOPPADDING", (0, 0), (-1, -1), 1.5), ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
+            ]
+            if header:
+                style.append(("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F2F2F2")))
+            for c in labels:
+                style.append(("BACKGROUND", (c, 0), (c, -1), colors.HexColor("#F2F2F2")))
+            t.setStyle(TableStyle(style))
+            flow.append(KeepTogether([t]) if len(data) <= 25 else t)
+        elif kind == "note":
+            flow.append(Paragraph(_xml_escape(sec[1]), ParagraphStyle(
+                "sec_n", fontName=reg, fontSize=7.5, leading=9, textColor=colors.HexColor("#555555"), spaceBefore=3)))
+        elif kind == "image":
+            png, width_in = sec[1], min(sec[2], usable_in)
+            w, h = Image.open(io.BytesIO(png)).size
+            img = RLImage(io.BytesIO(png), width=width_in * inch, height=width_in * h / w * inch)
+            img.hAlign = "CENTER"
+            flow.append(img)
+    return flow
+
+
+def word_export_button(container, label, file_name, lines, df, key=None, sections=None, footer_df=None):
     if not HAS_DOCX:
         container.warning("Word export needs the python-docx package. In Terminal run: "
                           "python3 -m pip install python-docx   then restart the app.")
         return
     container.download_button(
         label=label,
-        data=build_word_docx(lines, df, logo_left, logo_right),
+        data=build_word_docx(lines, df, logo_left, logo_right, sections=sections, footer_df=footer_df),
         file_name=file_name,
         mime=DOCX_MIME,
         key=key,
@@ -927,7 +1268,7 @@ def _pdf_fonts():
     return _PDF_FONTS
 
 
-def build_pdf(lines, df, logo_left=None, logo_right=None):
+def build_pdf(lines, df, logo_left=None, logo_right=None, sections=None, footer_df=None):
     """PDF twin of build_word_docx: same page size/margins, logos, title lines, font, font size,
     column widths, alignment and shaded, repeating header row."""
     reg, bold = _pdf_fonts()
@@ -976,39 +1317,43 @@ def build_pdf(lines, df, logo_left=None, logo_right=None):
     else:
         story.extend(line_paras(TA_LEFT))
     story.append(Spacer(1, 17.5))
+    if sections:
+        story.extend(_pdf_sections(sections, usable_in, reg, bold))
 
-    # ---- data table (identical column logic to the Word export)
-    right_idx, left_idx = {1, 2, 3}, {4}
-    cols = list(df.columns)
-    rows = [[_fmt_cell(v) for v in r] for r in df.itertuples(index=False, name=None)]
-    fit_w = [
-        max([_text_width_in(c, True)] + [_text_width_in(r[i], False) for r in rows]) + CELL_PAD_IN
-        for i, c in enumerate(cols)
-    ]
-    col_w = list(fit_w)
-    if len(cols) > 4:
-        col_w[4] = max(usable_in - (sum(fit_w) - fit_w[4]), 1.0)
+    if df is not None:
+        # ---- data table (identical column logic to the Word export)
+        right_idx, left_idx = {1, 2, 3}, {4}
+        cols = list(df.columns)
+        rows = [[_fmt_cell(v) for v in r] for r in df.itertuples(index=False, name=None)]
+        fit_w = [
+            max([_text_width_in(c, True)] + [_text_width_in(r[i], False) for r in rows]) + CELL_PAD_IN
+            for i, c in enumerate(cols)
+        ]
+        col_w = list(fit_w)
+        if len(cols) > 4:
+            col_w[4] = max(usable_in - (sum(fit_w) - fit_w[4]), 1.0)
 
-    table = Table([[str(c) for c in cols]] + rows, colWidths=[w * inch for w in col_w], repeatRows=1)
-    style = [
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
-        ("FONTNAME", (0, 0), (-1, 0), bold),
-        ("FONTNAME", (0, 1), (-1, -1), reg),
-        ("FONTSIZE", (0, 0), (-1, -1), TABLE_FONT_PT),
-        ("LEADING", (0, 0), (-1, -1), TABLE_FONT_PT * 1.15),
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F2F2F2")),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 0.08 * inch), ("RIGHTPADDING", (0, 0), (-1, -1), 0.08 * inch),
-        ("TOPPADDING", (0, 0), (-1, -1), 1.5), ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
-    ]
-    for i in range(len(cols)):
-        a = "LEFT" if i in left_idx else "RIGHT" if i in right_idx else "CENTER"
-        style.append(("ALIGN", (i, 0), (i, -1), a))
-    table.setStyle(TableStyle(style))
-    story.append(table)
+        table = Table([[str(c) for c in cols]] + rows, colWidths=[w * inch for w in col_w], repeatRows=1)
+        style = [
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+            ("FONTNAME", (0, 0), (-1, 0), bold),
+            ("FONTNAME", (0, 1), (-1, -1), reg),
+            ("FONTSIZE", (0, 0), (-1, -1), TABLE_FONT_PT),
+            ("LEADING", (0, 0), (-1, -1), TABLE_FONT_PT * 1.15),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F2F2F2")),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0.08 * inch), ("RIGHTPADDING", (0, 0), (-1, -1), 0.08 * inch),
+            ("TOPPADDING", (0, 0), (-1, -1), 1.5), ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
+        ]
+        for i in range(len(cols)):
+            a = "LEFT" if i in left_idx else "RIGHT" if i in right_idx else "CENTER"
+            style.append(("ALIGN", (i, 0), (i, -1), a))
+        table.setStyle(TableStyle(style))
+        story.append(table)
+
 
     # ---- footer (bottom-left): export date/time + report info, page numbers on the right
-    f1, f2 = _export_footer_lines(lines, df)
+    f1, f2 = _export_footer_lines(lines, footer_df if footer_df is not None else df)
 
     class _NumberedCanvas(rl_canvas.Canvas):
         """Two-pass canvas so the footer can say 'Page X of Y'."""
@@ -1047,14 +1392,14 @@ def build_pdf(lines, df, logo_left=None, logo_right=None):
     return buf.getvalue()
 
 
-def pdf_export_button(container, label, file_name, lines, df, key=None):
+def pdf_export_button(container, label, file_name, lines, df, key=None, sections=None, footer_df=None):
     if not HAS_PDF:
         container.warning("PDF export needs the reportlab package. In Terminal run: "
                           "python3 -m pip install reportlab   then restart the app.")
         return
     container.download_button(
         label=label,
-        data=build_pdf(lines, df, logo_left, logo_right),
+        data=build_pdf(lines, df, logo_left, logo_right, sections=sections, footer_df=footer_df),
         file_name=file_name,
         mime="application/pdf",
         key=key,
@@ -1424,6 +1769,7 @@ with main_tab_scoring:
     tab_objects = st.tabs(tabs)
 
     overall_match_points = {c['Competitor']: Fraction(0) for c in st.session_state.competitors_list}
+    stage_tables = {}      # stage name -> finished stage table (used by the player report)
 
     for i, s_name in enumerate(stage_names):
         with tab_objects[i]:
@@ -1622,6 +1968,7 @@ with main_tab_scoring:
             order = sorted(range(len(hf_exact)), key=lambda i: -hf_exact[i])
             df_stage = df_stage.iloc[order].reset_index(drop=True)
             df_stage["Rank"] = rank_min(df_stage["HF_exact"].tolist())
+            stage_tables[s_name] = df_stage.copy()
 
             # Stage Display Table (UI view)
             df_stage_view = df_stage[["Rank", "Stage %", "Stage Points", "#", "Competitor", "Cat", "Reg", "Cls", "Tag", "ICS", "Raw Points", "Raw Time", "Hit Factor", "Power"]]
@@ -1816,6 +2163,62 @@ with main_tab_scoring:
                     m_col6.metric("Mikes (M)", comp_cum["M"])
                     m_col7.metric("Penalties", comp_cum["NS"] + comp_cum["FTE"] + comp_cum["P"], help="NS + FTE + P")
                     m_col8.metric("Total Time", f"{comp_cum['Total Time']}s")
+
+            with st.expander("👤 View Individual Player Report"):
+                report_name = st.selectbox(
+                    "Select Competitor for the player report:",
+                    options=df_overall["Competitor"].tolist(),
+                    key="select_player_report",
+                )
+                if report_name:
+                    rep = build_player_report(report_name, df_overall, stage_tables, stage_names, st.session_state.scores)
+                    tot = rep["totals"]
+
+                    k1, k2, k3, k4, k5, k6 = st.columns(6)
+                    k1.metric("Rank", f"#{rep['rank']} of {rep['n_players']}" + (" (tied)" if rep["tied"] else ""))
+                    k2.metric("Total Points", f"{rep['points']:.2f}")
+                    k3.metric("% of 1st", f"{rep['percent']:.2f}%")
+                    k4.metric("Behind 1st", f"{rep['behind']:.2f}")
+                    k5.metric("Total Time", f"{rep['total_time']:.2f}s")
+                    k6.metric("Penalties", tot["M"] + tot["NS"] + tot["FTE"] + tot["P"], help="M + NS + FTE + P")
+
+                    h1, h2, h3, h4, h5, h6, h7 = st.columns(7)
+                    h1.metric("Alpha (A)", tot["A"], help="Includes steel hits")
+                    h2.metric("Charlie (C)", tot["C"])
+                    h3.metric("Delta (D)", tot["D"])
+                    h4.metric("Mike (M)", tot["M"])
+                    h5.metric("No-Shoot (NS)", tot["NS"])
+                    h6.metric("FTE", tot["FTE"])
+                    h7.metric("Procedural (P)", tot["P"])
+
+                    chart_col, stats_col = st.columns([3, 2])
+                    with chart_col:
+                        if rep["png"]:
+                            st.image(rep["png"], caption="Hits only: A, C, D, M, NS, FTE")
+                        else:
+                            st.warning("The pie chart needs the matplotlib package. In Terminal run: "
+                                       "python3 -m pip install matplotlib   then restart the app.")
+                    with stats_col:
+                        st.dataframe(pd.DataFrame(rep["highlights"], columns=["Highlight", "Value"]),
+                                     hide_index=True, use_container_width=True)
+
+                    st.markdown("##### Stage-by-Stage Breakdown")
+                    st.dataframe(pd.DataFrame(rep["stage_rows"], columns=rep["stage_header"]),
+                                 hide_index=True, use_container_width=True)
+
+                    st.markdown("#### 📥 Export Player Report")
+                    pr_col1, pr_col2 = st.columns(2)
+                    pr_lines = [(match_name, 16, True), (f"{division} (Individual Player Report)", 12, False),
+                                (f"{report_name} (#{rep['num']})  |  Date: {match_date.strftime('%B %d, %Y')}", 10, False)]
+                    pr_file = f"{match_name}_{division}_{report_name}_Player_Report".replace("/", "-").replace("\\", "-")
+                    pdf_export_button(
+                        pr_col1, "📥 Download Player Report PDF (.pdf)", pr_file + ".pdf",
+                        pr_lines, None, key="dl_player_pdf", sections=rep["sections"], footer_df=rep["facts_df"],
+                    )
+                    word_export_button(
+                        pr_col2, "📥 Download Player Report Word (.docx)", pr_file + ".docx",
+                        pr_lines, None, key="dl_player_word", sections=rep["sections"], footer_df=rep["facts_df"],
+                    )
 
             # Filtered Export View (Only requested columns)
             export_columns = ["Rank", "%", "Points", "#", "Competitor", "A", "C", "D", "M", "NS", "FTE", "P", "Total Time"]
