@@ -519,7 +519,7 @@ def merge_match_states(datasets):
     # Match settings: first file that has each setting wins
     merged = {"version": 3}
     for key in ["match_name", "match_date", "country", "province", "match_level",
-                "range_master", "match_director", "num_stages", "stages"]:
+                "range_master", "match_director", "stats_director", "num_stages", "stages"]:
         for _, d in datasets:
             if d.get(key):
                 merged[key] = d[key]
@@ -917,12 +917,14 @@ def build_word_docx(lines, df, logo_left=None, logo_right=None, sections=None, f
 # ==========================================
 # ON-SCREEN TABLE WITH CENTRED HEADERS
 # ==========================================
-def show_centered_table(df, formats=None):
+def show_centered_table(df, formats=None, center_all=False, fit=False, bold_last=False):
     """Standings table for the app screen. st.dataframe draws its headers left/right aligned and
     cannot be changed, so this renders a plain HTML table with centred headers instead.
     Numbers stay right-aligned, text stays left-aligned. Colours follow the light/dark theme."""
     formats = formats or {}
     numeric = {c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])}
+    if center_all:      # every cell and header centred (Hit Breakdown tables)
+        numeric = set(df.columns)
     head = "".join(f"<th>{_html.escape(str(c))}</th>" for c in df.columns)
     body = []
     for row in df.itertuples(index=False, name=None):
@@ -941,6 +943,7 @@ def show_centered_table(df, formats=None):
         body.append("<tr>" + "".join(tds) + "</tr>")
     css = (
         ".ct-wrap{overflow-x:auto;margin:0.25rem 0 1rem 0;border:1px solid rgba(128,128,128,.35);border-radius:8px}"
+        + (".ct-wrap.fit{display:inline-block;max-width:100%}.ct{width:auto!important}" if fit else "") +
         ".ct{border-collapse:collapse;width:100%;font-size:0.875rem;color:inherit}"
         ".ct th{text-align:center;font-weight:700;padding:8px 12px;background:rgba(128,128,128,.16);"
         "border-bottom:1px solid rgba(128,128,128,.4);white-space:nowrap}"
@@ -949,9 +952,12 @@ def show_centered_table(df, formats=None):
         ".ct td.txt{text-align:left}"
         ".ct tr:nth-child(even) td{background:rgba(128,128,128,.07)}"
         ".ct tr:last-child td{border-bottom:none}"
+        + (".ct tr:last-child td{font-weight:700}" if bold_last else "") +
+        ""
     )
+    fit_cls = ' fit' if fit else ''
     # One unindented line: Streamlit's markdown turns lines indented 4+ spaces into a code block.
-    html_table = (f"<style>{css}</style><div class='ct-wrap'><table class='ct'><thead><tr>{head}</tr></thead>"
+    html_table = (f"<style>{css}</style><div class='ct-wrap{fit_cls}'><table class='ct'><thead><tr>{head}</tr></thead>"
                   f"<tbody>{''.join(body)}</tbody></table></div>")
     st.markdown(html_table, unsafe_allow_html=True)
 
@@ -960,6 +966,9 @@ def show_centered_table(df, formats=None):
 # INDIVIDUAL PLAYER REPORT  (on screen + PDF + Word)
 # ==========================================
 HIT_ORDER = ["A", "C", "D", "M", "NS"]
+HIT_FULL = {"A": "Alpha (A)", "C": "Charlie (C)", "D": "Delta (D)", "M": "Mike (M)",
+            "NS": "No-Shoot (NS)", "P": "Procedural (P)"}
+STAGE_TBL_FULL = {"Pts": "Points (Pts)", "HF": "Hit Factor (HF)", **HIT_FULL}
 HIT_COLORS = {"A": "#2E9E4F",    # green
               "C": "#2F6FDE",    # blue
               "D": "#F28C28",    # orange
@@ -1582,7 +1591,9 @@ ss.setdefault("province_text", "")
 ss.setdefault("match_level", MATCH_LEVELS[0])
 ss.setdefault("range_master", "")
 ss.setdefault("match_director", "")
+ss.setdefault("stats_director", "")
 ss.setdefault("num_stages", 1)
+ss.setdefault("config_done", False)
 ss.setdefault("member_list", [])
 ss.setdefault("member_uploader_n", 0)
 
@@ -1628,8 +1639,10 @@ if "pending_load" in ss:
             ss["province_text"] = data["province"]
     if data.get("match_level") in MATCH_LEVELS:
         ss["match_level"] = data["match_level"]
+    ss["config_done"] = True   # a loaded match already has its configuration
     ss["range_master"] = data.get("range_master", "")
     ss["match_director"] = data.get("match_director", "")
+    ss["stats_director"] = data.get("stats_director", "")
 
     stages = data.get("stages", [])
     if stages:
@@ -1643,7 +1656,6 @@ if "pending_load" in ss:
             ss[f"po_{idx}"] = int(stg.get("poppers", 0))
             ss[f"dis_{idx}"] = int(stg.get("disappearing", 0))
             ss[f"pen_{idx}"] = int(stg.get("penalty", 0))
-            ss[f"minr_{idx}"] = int(stg.get("min_rounds", 0))
             ss[f"ics_{idx}"] = bool(stg.get("ics", False))
             ss[f"excl_{idx}"] = bool(stg.get("exclude", False))
 
@@ -1664,24 +1676,30 @@ for s in range(1, num_stages + 1):
     ss.setdefault(f"s_name_{s}", f"Stage {s}")
     ss.setdefault(f"s_loc_{s}", "")
     ss.setdefault(f"s_course_{s}", COURSE_TYPES[0])
-    for k in ("p", "pl", "po", "dis", "pen", "minr"):
+    for k in ("p", "pl", "po", "dis", "pen"):
         ss.setdefault(f"{k}_{s}", 0)
     ss.setdefault(f"ics_{s}", False)
     ss.setdefault(f"excl_{s}", False)
+# Streamlit forgets a widget's value if the widget isn't drawn in a run (e.g. while the other tabs are locked).
+# Re-assigning the values keeps the stage set-up safe.
+for _k in ["num_stages"] + [f"{p}_{s}" for s in range(1, num_stages + 1)
+                            for p in ("s_name", "s_loc", "s_course", "p", "pl", "po", "dis", "pen", "ics", "excl")]:
+    if _k in ss:
+        ss[_k] = ss[_k]
 
 stage_names, stage_config = [], {}
 for s in range(1, num_stages + 1):
     title = str(ss[f"s_name_{s}"])
     paper, plates, poppers = int(ss[f"p_{s}"]), int(ss[f"pl_{s}"]), int(ss[f"po_{s}"])
-    dis, pen, minr = int(ss[f"dis_{s}"]), int(ss[f"pen_{s}"]), int(ss[f"minr_{s}"])
-    total_rounds = (paper + dis) * 2 + plates + poppers          # rounds needed for full marks
-    score_cap = min(minr, total_rounds) if minr > 0 else total_rounds   # A+C+D can never exceed this
+    dis, pen = int(ss[f"dis_{s}"]), int(ss[f"pen_{s}"])
+    total_rounds = (paper + dis) * 2 + plates + poppers          # = Minimum Rounds (rounds needed for full marks)
+    score_cap = total_rounds                                      # A+C+D can never exceed this
     ics = bool(ss[f"ics_{s}"])
     stage_names.append(title)
     stage_config[title] = {
         "idx": s, "title": title, "location": str(ss[f"s_loc_{s}"]), "course": ss[f"s_course_{s}"],
         "paper": paper, "plates": plates, "poppers": poppers, "disappearing": dis, "penalty": pen,
-        "min_rounds": minr, "total_rounds": total_rounds, "score_cap": score_cap,
+        "min_rounds": total_rounds, "total_rounds": total_rounds, "score_cap": score_cap,
         "max_pts": total_rounds * 5, "ics": ics, "exclude": ics and bool(ss[f"excl_{s}"]),
     }
 title_problem = len(set(stage_names)) != len(stage_names) or any(not n.strip() for n in stage_names)
@@ -1839,6 +1857,7 @@ match_state_data = {
     "match_level": ss["match_level"],
     "range_master": ss["range_master"],
     "match_director": ss["match_director"],
+    "stats_director": ss["stats_director"],
     "num_stages": num_stages,
     "stages": [
         {k: stage_config[n][k] for k in ("title", "location", "course", "paper", "plates", "poppers",
@@ -2005,6 +2024,30 @@ with st.sidebar.expander("🏷️ Member List", expanded=False):
     else:
         st.info("The Member List is empty. Add a member above or load a JSON.")
 
+with st.sidebar.expander("🖼️ Logos for Exports", expanded=False):
+    st.caption("Your PPSA (left) and MPRAI (right) logos are built in and appear on every Word/PDF export. "
+               "Upload a file below only if you want to replace one.")
+    for side, label in (("left", "Left logo"), ("right", "Right logo")):
+        up = st.file_uploader(f"{label} (PNG/JPG)", type=["png", "jpg", "jpeg"], key=f"logo_up_{side}")
+        if up is not None:
+            sig = (up.name, up.size)
+            if ss.get(f"logo_{side}_sig") != sig:   # apply each new file once
+                try:
+                    ss[f"logo_{side}"] = process_logo(up.getvalue())
+                    ss[f"logo_{side}_sig"] = sig
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Couldn't read that image: {e}")
+        preview = ss.get(f"logo_{side}") or default_logo(side)
+        if preview:
+            st.image(preview, width=90)
+        if ss.get(f"logo_{side}"):
+            if st.button(f"Remove {label.lower()}", key=f"logo_rm_{side}"):
+                ss.pop(f"logo_{side}", None)
+                st.rerun()
+logo_left = ss.get("logo_left") or default_logo("left")
+logo_right = ss.get("logo_right") or default_logo("right")
+
 # ==========================================
 # MAIN APP HEADER
 # ==========================================
@@ -2014,73 +2057,70 @@ _place = ss["country"] + (f", {ss['province'] if ss['country'] == 'Philippines' 
 st.caption(f"Date: {match_date.strftime('%B %d, %Y')} | {ss['match_level']} | {_place}")
 
 (tab_cfg, main_tab_roster, tab_stage_setup, tab_scoring,
- tab_stage_results, tab_overall, tab_hits) = st.tabs([
+ tab_results, tab_hits) = st.tabs([
     "⚙️ Match Configuration", "👤 Competitor Roster", "📋 Stage Set-up", "🎯 Match Scoring",
-    "📊 Stage Results", "🏆 Overall Results", "📈 Hit Breakdown and Graphs"])
+    "📊 Results", "📈 Hit Breakdown and Graphs"])
 
 # ------------------------------------------
 # TAB 1: MATCH CONFIGURATION
 # ------------------------------------------
 with tab_cfg:
     st.header("⚙️ Match Configuration")
+    locked = bool(ss["config_done"])
+    if locked:
+        st.success("🔒 Match configuration applied. The other tabs are unlocked.")
+    else:
+        st.info("Fill in the match details below, then press **Apply Match Configuration** to unlock the other tabs.")
     c1, c2 = st.columns(2)
     with c1:
-        st.text_input("Match Name", key="match_name")
-        st.date_input("Match Date", key="match_date")
-        st.selectbox("Match Level", MATCH_LEVELS, key="match_level")
-        st.text_input("Range Master", key="range_master")
-        st.text_input("Match Director", key="match_director")
+        st.text_input("Match Name", key="match_name", disabled=locked)
+        st.date_input("Match Date", key="match_date", disabled=locked)
+        st.selectbox("Match Level", MATCH_LEVELS, key="match_level", disabled=locked)
+        st.selectbox("Region (Country)", COUNTRIES, key="country", disabled=locked)
     with c2:
-        st.selectbox("Region (Country)", COUNTRIES, key="country")
         if ss["country"] == "Philippines":
-            st.selectbox("Province", PH_PROVINCES, key="province")
+            st.selectbox("Province", PH_PROVINCES, key="province", disabled=locked)
         else:
-            st.text_input("Province / State", key="province_text")
-        st.number_input("Number of Stages", min_value=1, max_value=20, step=1, key="num_stages",
-                        help="Creates that many sections in the Stage Set-up tab.")
+            st.text_input("Province / State", key="province_text", disabled=locked)
+        st.text_input("Range Master", key="range_master", disabled=locked)
+        st.text_input("Match Director", key="match_director", disabled=locked)
+        st.text_input("Stats Director", key="stats_director", disabled=locked)
+
+    if locked:
+        if st.button("✏️ Edit Match Configuration", key="cfg_edit"):
+            ss["config_done"] = False
+            st.rerun()
+    else:
+        if st.button("✅ Apply Match Configuration", type="primary", key="cfg_apply"):
+            if not str(ss["match_name"]).strip():
+                st.error("Please enter a match name.")
+            else:
+                ss["config_done"] = True
+                st.rerun()
 
     st.markdown("### 🎯 Summary of Targets (whole match)")
     st.caption("Calculated automatically from the Stage Set-up tab and the Roster.")
     tp = sum(stage_config[n]["paper"] + stage_config[n]["disappearing"] for n in stage_names)
     td_ = sum(stage_config[n]["disappearing"] for n in stage_names)
-    t1, t2, t3, t4 = st.columns(4)
-    t1.metric("Paper Targets", tp, help=f"Includes {td_} disappearing target(s).")
-    t2.metric("Poppers", sum(stage_config[n]["poppers"] for n in stage_names))
-    t3.metric("Plates", sum(stage_config[n]["plates"] for n in stage_names))
-    t4.metric("Penalty Targets", sum(stage_config[n]["penalty"] for n in stage_names))
-    t5, t6, t7 = st.columns(3)
-    t5.metric("Number of Stages", num_stages)
-    t6.metric("Minimum Rounds", sum(stage_config[n]["min_rounds"] for n in stage_names))
-    t7.metric("Number of Competitors", len(ss.competitors_list))
-    if td_:
-        st.caption(f"Paper Targets include {td_} disappearing target(s).")
+    sc1, sc2 = st.columns(2)
+    with sc1:
+        st.markdown(
+            f"- **Paper Targets:** {tp}" + (f" (includes {td_} disappearing)" if td_ else "") + "\n"
+            f"- **Plates:** {sum(stage_config[n]['plates'] for n in stage_names)}\n"
+            f"- **Poppers:** {sum(stage_config[n]['poppers'] for n in stage_names)}\n"
+            f"- **Penalty Targets:** {sum(stage_config[n]['penalty'] for n in stage_names)}")
+    with sc2:
+        st.markdown(
+            f"- **Number of Stages:** {num_stages}\n"
+            f"- **Number of Competitors:** {len(ss.competitors_list)}\n"
+            f"- **Minimum Rounds:** {sum(stage_config[n]['min_rounds'] for n in stage_names)}")
 
-    st.markdown("### 🖼️ Logos for Exports")
-    st.caption("Your PPSA (left) and MPRAI (right) logos are built in and appear on every Word/PDF export. "
-               "Upload a file below only if you want to replace one.")
-    lc1, lc2 = st.columns(2)
-    for col, (side, label) in zip((lc1, lc2), (("left", "Left logo"), ("right", "Right logo"))):
-        with col:
-            up = st.file_uploader(f"{label} (PNG/JPG)", type=["png", "jpg", "jpeg"], key=f"logo_up_{side}")
-            if up is not None:
-                sig = (up.name, up.size)
-                if ss.get(f"logo_{side}_sig") != sig:   # apply each new file once
-                    try:
-                        ss[f"logo_{side}"] = process_logo(up.getvalue())
-                        ss[f"logo_{side}_sig"] = sig
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Couldn't read that image: {e}")
-            preview = ss.get(f"logo_{side}") or default_logo(side)
-            if preview:
-                st.image(preview, width=90)
-            if ss.get(f"logo_{side}"):
-                if st.button(f"Remove {label.lower()}", key=f"logo_rm_{side}"):
-                    ss.pop(f"logo_{side}", None)
-                    st.rerun()
-
-logo_left = ss.get("logo_left") or default_logo("left")
-logo_right = ss.get("logo_right") or default_logo("right")
+# Match Configuration must be applied before anything else can be used
+if not ss["config_done"]:
+    for _t in (main_tab_roster, tab_stage_setup, tab_scoring, tab_results, tab_hits):
+        with _t:
+            st.info("🔒 Complete the **Match Configuration** tab first (press **Apply Match Configuration**) to unlock this tab.")
+    st.stop()
 
 # ------------------------------------------
 # TAB 2: COMPETITOR ROSTER MANAGEMENT
@@ -2192,43 +2232,60 @@ with main_tab_roster:
 # ------------------------------------------
 with tab_stage_setup:
     st.header("📋 Stage Set-up")
+    with st.form("num_stages_form", border=False):
+        sn1, sn2 = st.columns([2, 1])
+        with sn1:
+            st.number_input("Number of Stages", min_value=1, max_value=20, step=1, key="num_stages",
+                            help="Creates that many sections below.")
+        with sn2:
+            st.write("")
+            st.form_submit_button("✅ Apply Number of Stages")
     st.caption("Press **Apply Stage** at the bottom of each section to save its changes.")
     if title_problem:
         st.error("⚠️ Every stage needs its own non-empty title. Duplicate or blank titles will mix up scores.")
+    fv_s = ss["form_ver"]
     for s in range(1, num_stages + 1):
         title_now = str(ss[f"s_name_{s}"])
         with st.expander(f"Stage {s}: {title_now}", expanded=(s == 1)):
-            with st.form(f"stage_form_{s}", border=False):
-                col_a, col_b = st.columns(2)
-                with col_a:
-                    st.text_input("Stage Name", key=f"s_name_{s}")
-                    st.text_input("Stage Location", key=f"s_loc_{s}")
-                    st.selectbox("Type of Course", COURSE_TYPES, key=f"s_course_{s}")
-                with col_b:
-                    st.number_input("Paper Targets", min_value=0, step=1, key=f"p_{s}")
-                    st.number_input("Plates", min_value=0, step=1, key=f"pl_{s}")
-                    st.number_input("Poppers", min_value=0, step=1, key=f"po_{s}")
-                    st.number_input("Disappearing Targets", min_value=0, step=1, key=f"dis_{s}",
-                                    help="Counts like a paper target for max points (2 rounds, 5 points each); a miss is not penalized.")
-                    st.number_input("Penalty Targets", min_value=0, step=1, key=f"pen_{s}",
-                                    help="Each Penalty target allows up to 2 NS hits when scoring (0 targets = NS locked).")
-                    st.number_input("Minimum Rounds", min_value=0, step=1, key=f"minr_{s}",
-                                    help="Caps the total A + C + D that can be entered when scoring (0 = use the full target count).")
-                st.form_submit_button(f"✅ Apply Stage {s}")
+            dk = lambda f, s=s: f"d{fv_s}_{f}_{s}"     # draft keys: only copied into the stage when Apply is pressed
+            col_a, col_b = st.columns(2)
+            with col_a:
+                st.text_input("Stage Name", value=ss[f"s_name_{s}"], key=dk("name"))
+                st.text_input("Stage Location", value=ss[f"s_loc_{s}"], key=dk("loc"))
+                cur_course = ss[f"s_course_{s}"] if ss[f"s_course_{s}"] in COURSE_TYPES else COURSE_TYPES[0]
+                st.selectbox("Type of Course", COURSE_TYPES, index=COURSE_TYPES.index(cur_course), key=dk("course"))
+                st.selectbox("ICS Classifier Stage", ["No", "Yes"], index=1 if ss[f"ics_{s}"] else 0, key=dk("ics"))
+                if ss[dk("ics")] == "Yes":
+                    st.selectbox("Exclude from scoring (leave out of overall results)", ["No", "Yes"],
+                                 index=1 if ss[f"excl_{s}"] else 0, key=dk("excl"))
+            with col_b:
+                st.number_input("Paper Targets", min_value=0, step=1, value=int(ss[f"p_{s}"]), key=dk("p"))
+                st.number_input("Plates", min_value=0, step=1, value=int(ss[f"pl_{s}"]), key=dk("pl"))
+                st.number_input("Poppers", min_value=0, step=1, value=int(ss[f"po_{s}"]), key=dk("po"))
+                st.number_input("Disappearing Targets", min_value=0, step=1, value=int(ss[f"dis_{s}"]), key=dk("dis"),
+                                help="Counts like a paper target for max points (2 rounds, 5 points each); a miss is not penalized.")
+                st.number_input("Penalty Targets", min_value=0, step=1, value=int(ss[f"pen_{s}"]), key=dk("pen"),
+                                help="Each Penalty target allows up to 2 NS hits when scoring (0 targets = NS locked).")
+            if st.button(f"✅ Apply Stage {s}", key=f"apply_stage_{s}"):
+                ss[f"s_name_{s}"] = ss[dk("name")]
+                ss[f"s_loc_{s}"] = ss[dk("loc")]
+                ss[f"s_course_{s}"] = ss[dk("course")]
+                for short in ("p", "pl", "po", "dis", "pen"):
+                    ss[f"{short}_{s}"] = int(ss[dk(short)])
+                ics_yes = ss[dk("ics")] == "Yes"
+                ss[f"ics_{s}"] = ics_yes
+                ss[f"excl_{s}"] = ics_yes and ss.get(dk("excl"), "No") == "Yes"
+                st.rerun()
             cfg_s = stage_config[title_now] if not title_problem else None
             if cfg_s:
                 cap_limit = COURSE_CAPS[cfg_s["course"]]
-                st.caption(f"Max Points: **{cfg_s['max_pts']} pts** | Rounds needed for full marks: **{cfg_s['total_rounds']}** | "
-                           f"Minimum Rounds: **{cfg_s['min_rounds']}** | Penalty Targets: **{cfg_s['penalty']}**")
+                st.caption(f"Max Points: **{cfg_s['max_pts']} pts** | Minimum Rounds: **{cfg_s['min_rounds']}** | "
+                           f"Penalty Targets: **{cfg_s['penalty']}**"
+                           + (" | ICS Classifier" + (" (excluded from overall)" if cfg_s["exclude"] else "") if cfg_s["ics"] else ""))
                 if cfg_s["total_rounds"] == 0:
                     st.warning("This stage has no targets yet.")
                 if cfg_s["min_rounds"] > cap_limit:
                     st.warning(f"Minimum rounds ({cfg_s['min_rounds']}) exceeds the limit for this course type ({cap_limit}).")
-                if cfg_s["min_rounds"] > cfg_s["total_rounds"]:
-                    st.warning("Minimum rounds is higher than the rounds the targets can absorb; the target count will be used as the cap.")
-            st.checkbox("This is an ICS Classifier stage", key=f"ics_{s}")
-            if ss[f"ics_{s}"]:
-                st.checkbox("Exclude from scoring (leave this stage out of the overall results)", key=f"excl_{s}")
 
 # ------------------------------------------
 # TAB 4: MATCH SCORING
@@ -2247,24 +2304,15 @@ with tab_scoring:
             with st.expander(f"{s_name}" + ("  (ICS classifier - excluded from overall)" if cfg["exclude"]
                                            else "  (ICS classifier)" if cfg["ics"] else ""), expanded=False):
                 st.info(f"Targets: **{cfg['paper']} Paper** | **{cfg['disappearing']} Disappearing** | **{cfg['plates']} Plates** | "
-                        f"**{cfg['poppers']} Poppers** | **{cfg['penalty']} Penalty** | Rounds for full marks: **{cfg['total_rounds']}** | "
-                        f"Minimum Rounds: **{cfg['min_rounds']}** | Max Points: **{cfg['max_pts']}**")
+                        f"**{cfg['poppers']} Poppers** | **{cfg['penalty']} Penalty** | Minimum Rounds: **{cfg['min_rounds']}** | "
+                        f"Max Points: **{cfg['max_pts']}**")
                 selected_shooter = st.selectbox("Select Competitor to Enter Score",
                                                 options=[c["Competitor"] for c in active_competitors], key=f"select_{si}")
                 shooter_info = next(c for c in active_competitors if c["Competitor"] == selected_shooter)
                 pf = shooter_info["Power"]
 
-                d1, d2, d3, d4, d5 = st.columns(5)
-                d1.markdown(f"**#:** {shooter_info['#']}")
-                d1.markdown(f"**Name:** {shooter_info['Competitor']}")
-                d2.markdown(f"**Division:** {shooter_info.get('Division', '-')}")
-                d2.markdown(f"**Power Factor:** {pf}")
-                d3.markdown(f"**Category:** {shooter_info['Cat'] or '-'}")
-                d3.markdown(f"**Class:** {shooter_info['Cls'] or '-'}")
-                d4.markdown(f"**Region:** {shooter_info['Reg'] or '-'}")
-                d4.markdown(f"**Tag:** {shooter_info['Tag'] or '-'}")
-                d5.markdown(f"**ICS:** {shooter_info['ICS'] or '-'}")
-                d5.markdown(f"**DQ:** {'Yes' if shooter_info.get('DQ') else 'No'}")
+                roster_cols = ["#", "Competitor", "Division", "Cat", "Reg", "Cls", "Tag", "ICS", "Power", "DQ"]
+                st.dataframe(pd.DataFrame([shooter_info]).reindex(columns=roster_cols), hide_index=True, use_container_width=True)
 
                 key = (s_name, selected_shooter)
                 existing = ss.scores.get(key, {})
@@ -2342,13 +2390,13 @@ with tab_scoring:
                                 hf_v = 0.0
                             else:
                                 hf_v = float(Fraction(net_p) / Fraction(str(saved["time"])))
-                            st.metric("Raw Points (before deductions)", f"{raw_p}")
-                            st.metric("Deductions", f"-{ded_p}")
-                            st.metric("Stage Points (after deductions)", f"{net_p}")
-                            st.metric("Hit Factor", f"{hf_v:.4f}")
+                            tvals = [("Raw Points", f"{raw_p}"), ("Deductions", f"-{ded_p}"),
+                                     ("Stage Points", f"{net_p}"), ("Hit Factor", f"{hf_v:.4f}")]
                         else:
-                            st.caption("Nothing saved yet.")
-                        st.caption("Totals show the saved score and refresh after you press Save.")
+                            tvals = [("Raw Points", "-"), ("Deductions", "-"), ("Stage Points", "-"), ("Hit Factor", "-")]
+                        for lab, val in tvals:   # read-only boxes so they line up with the inputs in the other columns
+                            st.text_input(lab, value=val, disabled=True, key=f"tot_{lab}_{si}_{selected_shooter}_{val}")
+                        st.caption("Refreshes after you press Save.")
 
         # warn about saved runs with zero time
         zero_names = sorted({k[1] for k, v in ss.scores.items() if k[0] in stage_config and not v.get("DNF", False) and v.get("time", 0) <= 0})
@@ -2357,7 +2405,7 @@ with tab_scoring:
                        f"They receive **0 points** on those stages until a time is entered or DNF is set.")
 
 # ------------------------------------------
-# TAB 5: STAGE RESULTS
+# TAB 5: RESULTS (STAGE + OVERALL)
 # ------------------------------------------
 STAGE_VIEW_COLS = ["Rank", "Stage %", "Stage Points", "#", "Competitor", "Division", "Cat", "Reg", "Cls", "Tag", "ICS",
                    "Raw Points", "Deductions", "Net Points", "Raw Time", "Hit Factor", "Power"]
@@ -2380,44 +2428,6 @@ def export_row(container_cols, title_line, file_stub, df_export, key):
     word_export_button(container_cols[1], "📥 Download Word (.docx)", file_stub + ".docx", lines, df_export, key=f"word_{key}")
 
 
-with tab_stage_results:
-    st.header("📊 Stage Results")
-    if title_problem:
-        st.error("Fix the stage titles in the Stage Set-up tab first.")
-    elif not active_competitors:
-        st.warning("No active (non-DQ) competitors available.")
-    else:
-        with st.expander("Stage Results (per division)", expanded=False):
-            st.caption("Stage % and points compare each competitor with the best hit factor in the same division.")
-            stabs = st.tabs(stage_names)
-            for s_name, stab in zip(stage_names, stabs):
-                si = stage_config[s_name]["idx"]
-                with stab:
-                    if stage_config[s_name]["exclude"]:
-                        st.info("ICS classifier stage: shown here, but left out of the overall results.")
-                    df = stage_div[s_name]
-                    for div in divisions_present:
-                        sub = df[df["Division"] == div].reset_index(drop=True)
-                        st.markdown(f"#### {div}")
-                        show_centered_table(sub[STAGE_VIEW_COLS], STAGE_FMT)
-                        export_row(st.columns(2), f"{div} ({s_name})",
-                                   safe(f"{match_name}_{div}_{s_name}_Results"), stage_export_df(sub, False), f"stg_div_{si}_{div}")
-        with st.expander("Stage Results (all divisions)", expanded=False):
-            st.caption("Stage % and points compare each competitor with the best hit factor across ALL divisions.")
-            stabs = st.tabs(stage_names)
-            for s_name, stab in zip(stage_names, stabs):
-                si = stage_config[s_name]["idx"]
-                with stab:
-                    if stage_config[s_name]["exclude"]:
-                        st.info("ICS classifier stage: shown here, but left out of the overall results.")
-                    df = stage_all[s_name]
-                    show_centered_table(df[STAGE_VIEW_COLS], STAGE_FMT)
-                    export_row(st.columns(2), f"All Divisions ({s_name})",
-                               safe(f"{match_name}_All_Divisions_{s_name}_Results"), stage_export_df(df, True), f"stg_all_{si}")
-
-# ------------------------------------------
-# TAB 6: OVERALL RESULTS
-# ------------------------------------------
 OVERALL_COLS = ["Rank", "%", "Points", "#", "Competitor", "Division", "Cat", "Reg", "Cls", "Tag", "ICS", "Power"]
 
 
@@ -2431,29 +2441,63 @@ def overall_export_df(df, with_division):
     return out
 
 
-with tab_overall:
-    st.header("🏆 Overall Results")
+with tab_results:
+    st.header("📊 Results")
     if title_problem:
         st.error("Fix the stage titles in the Stage Set-up tab first.")
     elif not active_competitors:
-        st.warning("No active (non-DQ) competitors available for overall standings.")
+        st.warning("No active (non-DQ) competitors available.")
     else:
-        if excluded_stages:
-            st.info("Excluded from the overall totals (ICS classifier): " + ", ".join(sorted(excluded_stages)))
-        with st.expander("Overall Results (per division)", expanded=False):
-            for div in divisions_present:
-                sub = overall_div[overall_div["Division"] == div].reset_index(drop=True)
-                st.markdown(f"#### {div}")
-                show_centered_table(sub[OVERALL_COLS], {"Points": "{:.4f}", "%": "{:.2f}%"})
-                export_row(st.columns(2), f"{div} (Overall Standings)", safe(f"{match_name}_{div}_Overall_Standings"),
-                           overall_export_df(sub, False), f"ov_div_{div}")
-        with st.expander("Overall Results (all divisions)", expanded=False):
-            show_centered_table(overall_all[OVERALL_COLS], {"Points": "{:.4f}", "%": "{:.2f}%"})
-            export_row(st.columns(2), "All Divisions (Overall Standings)", safe(f"{match_name}_All_Divisions_Overall_Standings"),
-                       overall_export_df(overall_all, True), "ov_all")
+        SCOPE_ALL = "All Divisions"
+        scope_options = [SCOPE_ALL] + divisions_present
+
+        # ---------- STAGE RESULTS ----------
+        with st.expander("📊 Stage Results", expanded=False):
+            st_scope = st.selectbox("Division", scope_options, key="stage_res_scope")
+            if st_scope == SCOPE_ALL:
+                st.caption("Stage % and points compare each competitor with the best hit factor across ALL divisions.")
+            else:
+                st.caption(f"Stage % and points compare each competitor with the best hit factor in {st_scope}.")
+            stabs = st.tabs(stage_names)
+            for s_name, stab in zip(stage_names, stabs):
+                si = stage_config[s_name]["idx"]
+                with stab:
+                    if stage_config[s_name]["exclude"]:
+                        st.info("ICS classifier stage: shown here, but left out of the overall results.")
+                    if st_scope == SCOPE_ALL:
+                        df = stage_all[s_name]
+                        show_centered_table(df[STAGE_VIEW_COLS], STAGE_FMT)
+                        export_row(st.columns(2), f"All Divisions ({s_name})",
+                                   safe(f"{match_name}_All_Divisions_{s_name}_Results"),
+                                   stage_export_df(df, True), f"stg_all_{si}")
+                    else:
+                        df = stage_div[s_name]
+                        sub = df[df["Division"] == st_scope].reset_index(drop=True)
+                        show_centered_table(sub[STAGE_VIEW_COLS], STAGE_FMT)
+                        export_row(st.columns(2), f"{st_scope} ({s_name})",
+                                   safe(f"{match_name}_{st_scope}_{s_name}_Results"),
+                                   stage_export_df(sub, False), f"stg_div_{si}_{st_scope}")
+
+        # ---------- OVERALL RESULTS ----------
+        with st.expander("🏆 Overall Results", expanded=False):
+            if excluded_stages:
+                st.info("Excluded from the overall totals (ICS classifier): " + ", ".join(sorted(excluded_stages)))
+            ov_scope = st.selectbox("Division", scope_options, key="overall_res_scope")
+            ov_fmt = {"Points": "{:.4f}", "%": "{:.2f}%"}
+            if ov_scope == SCOPE_ALL:
+                show_centered_table(overall_all[OVERALL_COLS], ov_fmt)
+                export_row(st.columns(2), "All Divisions (Overall Standings)",
+                           safe(f"{match_name}_All_Divisions_Overall_Standings"),
+                           overall_export_df(overall_all, True), "ov_all")
+            else:
+                sub = overall_div[overall_div["Division"] == ov_scope].reset_index(drop=True)
+                show_centered_table(sub[OVERALL_COLS], ov_fmt)
+                export_row(st.columns(2), f"{ov_scope} (Overall Standings)",
+                           safe(f"{match_name}_{ov_scope}_Overall_Standings"),
+                           overall_export_df(sub, False), f"ov_div_{ov_scope}")
 
 # ------------------------------------------
-# TAB 7: HIT BREAKDOWN AND GRAPHS
+# TAB 6: HIT BREAKDOWN AND GRAPHS
 # ------------------------------------------
 with tab_hits:
     st.header("📈 Hit Breakdown and Graphs")
@@ -2477,15 +2521,11 @@ with tab_hits:
             if pick:
                 ci = base[base["Competitor"] == pick].iloc[0]
                 cc = df_cum[df_cum["Competitor"] == pick].iloc[0]
-                m = st.columns(8)
-                m[0].metric("Rank", f"#{ci['Rank']}")
-                m[1].metric("Total Points", f"{ci['Points']:.2f}")
-                m[2].metric("Alpha (A)", cc["A"], help="Includes steel hits")
-                m[3].metric("Charlie (C)", cc["C"])
-                m[4].metric("Delta (D)", cc["D"])
-                m[5].metric("Mikes (M)", cc["M"])
-                m[6].metric("Penalties", cc["NS"] + cc["P"], help="NS + P")
-                m[7].metric("Total Time", f"{cc['Total Time']}s")
+                show_centered_table(pd.DataFrame([{
+                    "Rank": f"#{ci['Rank']}", "Total Points": f"{ci['Points']:.2f}",
+                    **{HIT_FULL[k]: cc[k] for k in ("A", "C", "D", "M", "NS", "P")},
+                    "Total Time": f"{cc['Total Time']}s"}]), center_all=True, fit=True)
+                st.caption("A includes steel hits. P = procedural penalties.")
             st.markdown("#### 📥 Export Full Roster Cumulative Breakdown")
             export_row(st.columns(2), f"Full Roster Cumulative Hit & Time Summary - {scope}",
                        safe(f"{match_name}_{scope}_Full_Roster_Cumulative_Summary"), df_cum, "cum_roster")
@@ -2509,13 +2549,9 @@ with tab_hits:
                 k7.metric("% of 1st (all divisions)", f"{rep['percent_all']:.2f}%")
                 k8.metric("Total Time", f"{rep['total_time']:.2f}s")
 
-                h1, h2, h3, h4, h5, h6 = st.columns(6)
-                h1.metric("Alpha (A)", tot["A"], help="Includes steel hits")
-                h2.metric("Charlie (C)", tot["C"])
-                h3.metric("Delta (D)", tot["D"])
-                h4.metric("Mike (M)", tot["M"])
-                h5.metric("No-Shoot (NS)", tot["NS"])
-                h6.metric("Procedural (P)", tot["P"])
+                show_centered_table(pd.DataFrame([{HIT_FULL[k]: tot[k] for k in ("A", "C", "D", "M", "NS", "P")}]),
+                                    center_all=True, fit=True)
+                st.caption("A includes steel hits. P = procedural penalties.")
 
                 chart_col, stats_col = st.columns([3, 2])
                 with chart_col:
@@ -2529,11 +2565,13 @@ with tab_hits:
                                  hide_index=True, use_container_width=True)
 
                 st.markdown(f"##### Stage-by-Stage Breakdown - {rep['division']} Division")
-                st.dataframe(pd.DataFrame(rep["stage_rows"], columns=rep["stage_header"]),
-                             hide_index=True, use_container_width=True)
+                show_centered_table(pd.DataFrame(rep["stage_rows"],
+                                                 columns=[STAGE_TBL_FULL.get(h, h) for h in rep["stage_header"]]),
+                                    center_all=True, fit=True, bold_last=True)
                 st.markdown("##### Stage-by-Stage Results - All Divisions")
-                st.dataframe(pd.DataFrame(rep["all_rows"], columns=rep["all_header"]),
-                             hide_index=True, use_container_width=True)
+                show_centered_table(pd.DataFrame(rep["all_rows"],
+                                                 columns=[STAGE_TBL_FULL.get(h, h) for h in rep["all_header"]]),
+                                    center_all=True, fit=True, bold_last=True)
                 if excluded_stages:
                     st.caption("* ICS classifier stage excluded from the overall totals.")
 
