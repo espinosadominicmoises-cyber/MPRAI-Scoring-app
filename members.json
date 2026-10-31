@@ -1,0 +1,66 @@
+{
+    "type": "member_list",
+    "version": 2,
+    "member_list": [
+        {
+            "Competitor": "ALTABANO, Waren",
+            "Division": "Production",
+            "Cat": "",
+            "Reg": "PHI",
+            "Cls": "",
+            "Tag": "Law",
+            "ICS": "",
+            "Power": "Minor"
+        },
+        {
+            "Competitor": "DOLENDO, Nilo",
+            "Division": "Standard",
+            "Cat": "",
+            "Reg": "PHI",
+            "Cls": "",
+            "Tag": "",
+            "ICS": "",
+            "Power": "Major"
+        },
+        {
+            "Competitor": "ESPINOSA, Dominic Moises",
+            "Division": "Production",
+            "Cat": "",
+            "Reg": "PHI",
+            "Cls": "",
+            "Tag": "",
+            "ICS": "",
+            "Power": "Minor"
+        },
+        {
+            "Competitor": "FELICES, Lawrence",
+            "Division": "Standard Optics",
+            "Cat": "S",
+            "Reg": "PHI",
+            "Cls": "",
+            "Tag": "",
+            "ICS": "",
+            "Power": "Minor"
+        },
+        {
+            "Competitor": "MEDINA, Budoy",
+            "Division": "Standard",
+            "Cat": "S",
+            "Reg": "PHI",
+            "Cls": "",
+            "Tag": "",
+            "ICS": "",
+            "Power": "Major"
+        },
+        {
+            "Competitor": "ROSERO, Ireneo III",
+            "Division": "Production",
+            "Cat": "",
+            "Reg": "PHI",
+            "Cls": "",
+            "Tag": "",
+            "ICS": "",
+            "Power": "Minor"
+        }
+    ]
+}
