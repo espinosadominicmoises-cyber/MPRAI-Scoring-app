@@ -487,7 +487,7 @@ _EMBEDDED_LOGOS = {
 """,
 }
 
-st.set_page_config(page_title="IPSC Match Scoring System", layout="wide")
+st.set_page_config(page_title="IPSC Match Scoring System", layout="wide", initial_sidebar_state="expanded")
 
 # ==========================================
 # BROWSER REFRESH / CLOSE CONFIRMATION PROMPT
@@ -513,17 +513,13 @@ def merge_match_states(datasets):
     """Combine several match-state dicts into one.
     datasets: list of (label, dict). Returns (merged_dict, warnings).
     Competitors are matched by name (ignoring capitalisation); scores are simply added together.
-    Raises ValueError if the files belong to different divisions."""
+    Divisions are carried per competitor, so files from different divisions merge normally."""
     warnings = []
 
-    # Divisions are never combined
-    divisions = {d["division"] for _, d in datasets if d.get("division")}
-    if len(divisions) > 1:
-        raise ValueError(f"These files are from different divisions ({', '.join(sorted(divisions))}). Divisions are not combined.")
-
     # Match settings: first file that has each setting wins
-    merged = {"version": 2}
-    for key in ["match_name", "match_date", "division", "num_stages", "stages"]:
+    merged = {"version": 3}
+    for key in ["match_name", "match_date", "country", "province", "match_level",
+                "range_master", "match_director", "num_stages", "stages"]:
         for _, d in datasets:
             if d.get(key):
                 merged[key] = d[key]
@@ -541,11 +537,14 @@ def merge_match_states(datasets):
     if len({d["match_name"] for _, d in datasets if d.get("match_name")}) > 1:
         warnings.append("The files have different match names. Using the first one; double-check you picked the right files.")
 
-    base_stages = [(x.get("title"), x.get("paper"), x.get("steel")) for x in merged.get("stages", [])]
+    def _stage_sig(x):
+        return (x.get("title"), x.get("paper"), x.get("plates"), x.get("poppers"),
+                x.get("disappearing", 0), x.get("penalty", 0))
+
+    base_stages = [_stage_sig(x) for x in merged.get("stages", [])]
     for label, d in datasets:
         if d.get("stages"):
-            this_stages = [(x.get("title"), x.get("paper"), x.get("steel")) for x in d["stages"]]
-            if this_stages != base_stages:
+            if [_stage_sig(x) for x in d["stages"]] != base_stages:
                 warnings.append(f"{label}: stage titles/targets differ from the others. Using the first file's stage setup.")
 
     # Roster: union by name
@@ -561,6 +560,7 @@ def merge_match_states(datasets):
                 entry["Competitor"] = name
                 for f in ["Cat", "Reg", "Cls", "Tag", "ICS"]:
                     entry.setdefault(f, "")
+                entry.setdefault("Division", DIVISIONS[0])
                 entry.setdefault("Power", "Minor")
                 entry["DQ"] = bool(entry.get("DQ", False))
                 try:
@@ -584,6 +584,8 @@ def merge_match_states(datasets):
                         e[f] = c[f]
                 if c.get("DQ"):
                     e["DQ"] = True  # a DQ on any device stands
+                if c.get("Division") and c["Division"] != e["Division"]:
+                    warnings.append(f"{name}: Division differs between files ({e['Division']} vs {c['Division']}). Kept {e['Division']}.")
                 if c.get("Power") and c["Power"] != e["Power"]:
                     warnings.append(f"{name}: Power factor differs between files ({e['Power']} vs {c['Power']}). Kept {e['Power']}.")
     # Numbers are never reassigned; only fill in a missing one with the next free number
@@ -717,9 +719,10 @@ FOOTER_PT = 7
 
 
 def _export_footer_lines(lines, df):
-    """Two short lines for the footer:
+    """Three short lines for the footer:
     1) when it was exported + how many rows + a short data fingerprint
-    2) which report / match / division it belongs to (so a stray page is still identifiable)."""
+    2) which report / match / division it belongs to (so a stray page is still identifiable)
+    3) region (country, province), match level, range master and match director."""
     now = datetime.now(timezone(timedelta(hours=EXPORT_TZ_HOURS)))
     stamp = now.strftime("%B %d, %Y, %I:%M:%S %p").replace(" 0", " ")
     sign = "+" if EXPORT_TZ_HOURS >= 0 else "-"
@@ -731,7 +734,15 @@ def _export_footer_lines(lines, df):
          ).encode("utf-8")).hexdigest()[:8].upper()
     line1 = f"Exported: {stamp} {tz}  |  Rows: {len(df)}  |  Data ID: {digest}"
     line2 = "  |  ".join(text for text, _, _ in lines)
-    return line1, line2
+    place = st.session_state.get("country", "")
+    prov = st.session_state.get("province", "") if place == "Philippines" else st.session_state.get("province_text", "")
+    line3 = "  |  ".join([
+        f"Region: {place}" + (f", {prov}" if prov else ""),
+        f"Match Level: {st.session_state.get('match_level', '')}",
+        f"Range Master: {st.session_state.get('range_master', '') or '-'}",
+        f"Match Director: {st.session_state.get('match_director', '') or '-'}",
+    ])
+    return line1, line2, line3
 
 
 def build_word_docx(lines, df, logo_left=None, logo_right=None, sections=None, footer_df=None):
@@ -850,7 +861,7 @@ def build_word_docx(lines, df, logo_left=None, logo_right=None, sections=None, f
 
     # ---- footer (bottom-left): export date/time + report info, page numbers on the right
     sec.footer_distance = Inches(0.3)
-    f1, f2 = _export_footer_lines(lines, footer_df if footer_df is not None else df)
+    f1, f2, f3 = _export_footer_lines(lines, footer_df if footer_df is not None else df)
     foot = sec.footer
     foot.is_linked_to_previous = False
     p1 = foot.paragraphs[0]
@@ -862,6 +873,11 @@ def build_word_docx(lines, df, logo_left=None, logo_right=None, sections=None, f
     p2.style = doc.styles["Normal"]
     p2.alignment = WD_ALIGN_PARAGRAPH.LEFT
     r = p2.add_run(f2)
+    r.font.size, r.font.name = Pt(FOOTER_PT), "Arial"
+    p3 = foot.add_paragraph()
+    p3.style = doc.styles["Normal"]
+    p3.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    r = p3.add_run(f3)
     r.font.size, r.font.name = Pt(FOOTER_PT), "Arial"
     # "Page X of Y" fields, right-aligned on the first footer line via a right tab stop
     from docx.enum.text import WD_TAB_ALIGNMENT
@@ -943,7 +959,7 @@ def show_centered_table(df, formats=None):
 # ==========================================
 # INDIVIDUAL PLAYER REPORT  (on screen + PDF + Word)
 # ==========================================
-HIT_ORDER = ["A", "C", "D", "M", "NS", "FTE"]
+HIT_ORDER = ["A", "C", "D", "M", "NS"]
 HIT_COLORS = {"A": "#2E9E4F",    # green
               "C": "#2F6FDE",    # blue
               "D": "#F28C28",    # orange
@@ -951,11 +967,11 @@ HIT_COLORS = {"A": "#2E9E4F",    # green
               "NS": "#F2C230",   # yellow
               "FTE": "#7A808A"}  # grey
 _DARK_LABEL_ON = {"D", "NS"}     # slices light enough to need dark percentage text
-PIE_WIDTH_IN = 5.6               # printed width of the chart in the PDF / Word report
+PIE_WIDTH_IN = 4.4               # printed width of the chart in the PDF / Word report
 
 
 def make_hits_pie_png(counts):
-    """Donut chart of A, C, D, M, NS, FTE only. counts: dict with those keys.
+    """Donut chart of A, C, D, M, NS only. counts: dict with those keys.
     Returns PNG bytes (None if no matplotlib)."""
     if not HAS_MPL:
         return None
@@ -997,44 +1013,65 @@ def make_hits_pie_png(counts):
     return buf.getvalue()
 
 
-def build_player_report(name, df_overall, stage_tables, stage_names, scores):
-    """Everything about one competitor, in one place, so the screen, PDF and Word report all agree."""
-    me = df_overall[df_overall["Competitor"] == name].iloc[0]
-    n_players = len(df_overall)
-    tied = int((df_overall["Rank"] == me["Rank"]).sum()) > 1
-    leader_pts = float(df_overall["Points"].max())
+def build_player_report(name, ov_div, ov_all, st_div, st_all, stage_names, scores, excluded):
+    """Everything about one competitor, in one place, so the screen, PDF and Word report all agree.
+    ov_div / ov_all: overall standings (per-division ranking / all-divisions ranking).
+    st_div / st_all: stage name -> stage table (per-division / all-divisions scope).
+    excluded: set of stage names left out of the overall totals (ICS classifier, excluded)."""
+    me_d = ov_div[ov_div["Competitor"] == name].iloc[0]
+    me_a = ov_all[ov_all["Competitor"] == name].iloc[0]
+    div = me_d["Division"]
+    n_div = int((ov_div["Division"] == div).sum())
+    n_all = len(ov_all)
+    tied_d = int(((ov_div["Division"] == div) & (ov_div["Rank"] == me_d["Rank"])).sum()) > 1
+    tied_a = int((ov_all["Rank"] == me_a["Rank"]).sum()) > 1
+    lead_d = float(ov_div[ov_div["Division"] == div]["Points"].max())
+    lead_a = float(ov_all["Points"].max())
 
-    stage_rows, scored = [], []
-    tot = {k: 0 for k in ["A", "C", "D", "M", "NS", "FTE", "P"]}
-    tot_time, tot_pts = 0.0, 0.0
+    div_rows, all_rows, scored = [], [], []
+    tot = {k: 0 for k in ["A", "C", "D", "M", "NS", "P"]}
+    tot_time, tot_pts_d, tot_pts_a = 0.0, 0.0, 0.0
     for sname in stage_names:
-        t = stage_tables.get(sname)
+        mark = " *" if sname in excluded else ""
+        td, ta = st_div.get(sname), st_all.get(sname)
         rec = scores.get((sname, name))
-        mine = t[t["Competitor"] == name] if t is not None else None
-        if mine is None or mine.empty or not rec:
-            stage_rows.append([sname, "-", "-", "-", "-", "-", "0", "0", "0", "0", "0", "0", "0"])
+        if td is None or ta is None or not rec:
+            div_rows.append([sname + mark, "-", "-", "-", "-", "-", "0", "0", "0", "0", "0", "0"])
+            all_rows.append([sname + mark, "-", "-", "-", "-"])
             continue
-        r = mine.iloc[0]
-        a_all = int(r["A"]) + int(r["Steel"])
-        hits = {"A": a_all, "C": int(r["C"]), "D": int(r["D"]), "M": int(r["M"]),
-                "NS": int(r["NS"]), "FTE": int(r["FTE"]), "P": int(r["Proc"])}
+        rd = td[td["Competitor"] == name].iloc[0]
+        ra = ta[ta["Competitor"] == name].iloc[0]
+        n_stage_div = int((td["Division"] == div).sum())
+        hits = {"A": int(rd["A"]), "C": int(rd["C"]), "D": int(rd["D"]), "M": int(rd["M"]),
+                "NS": int(rd["NS"]), "P": int(rd["Proc"])}
         for k in tot:
             tot[k] += hits[k]
-        tot_time += float(r["Raw Time"])
-        tot_pts += float(r["Stage Points"])
+        tot_time += float(rd["Raw Time"])
+        if sname not in excluded:
+            tot_pts_d += float(rd["Stage Points"])
+            tot_pts_a += float(ra["Stage Points"])
         if rec.get("DNF", False):
-            lead = ["DNF", f"{float(r['Stage Points']):.4f}", "0.00%", "0.0000"]
+            lead_d_cells = ["DNF", f"{float(rd['Stage Points']):.4f}", "0.00%", "0.0000"]
+            lead_a_cells = ["DNF", f"{float(ra['Stage Points']):.4f}", "0.00%", "0.0000"]
         elif float(rec.get("time", 0)) <= 0:
-            lead = ["no time", f"{float(r['Stage Points']):.4f}", "0.00%", "0.0000"]
+            lead_d_cells = ["no time", f"{float(rd['Stage Points']):.4f}", "0.00%", "0.0000"]
+            lead_a_cells = ["no time", f"{float(ra['Stage Points']):.4f}", "0.00%", "0.0000"]
         else:
-            lead = [f"{int(r['Rank'])}/{len(t)}", f"{float(r['Stage Points']):.4f}",
-                    f"{float(r['Stage %']):.2f}%", f"{float(r['Hit Factor']):.4f}"]
-            scored.append({"stage": sname, "rank": int(r["Rank"]), "pct": float(r["Stage %"]), "hf": float(r["Hit Factor"])})
-        stage_rows.append([sname] + lead + [f"{float(r['Raw Time']):.2f}"] + [str(hits[k]) for k in ["A", "C", "D", "M", "NS", "FTE", "P"]])
+            lead_d_cells = [f"{int(rd['Rank'])}/{n_stage_div}", f"{float(rd['Stage Points']):.4f}",
+                            f"{float(rd['Stage %']):.2f}%", f"{float(rd['Hit Factor']):.4f}"]
+            lead_a_cells = [f"{int(ra['Rank'])}/{len(ta)}", f"{float(ra['Stage Points']):.4f}",
+                            f"{float(ra['Stage %']):.2f}%", f"{float(ra['Hit Factor']):.4f}"]
+            scored.append({"stage": sname, "rank": int(rd["Rank"]), "pct": float(rd["Stage %"]),
+                           "pct_all": float(ra["Stage %"]), "hf": float(rd["Hit Factor"])})
+        div_rows.append([sname + mark] + lead_d_cells + [f"{float(rd['Raw Time']):.2f}"]
+                        + [str(hits[k]) for k in ["A", "C", "D", "M", "NS", "P"]])
+        all_rows.append([sname + mark] + lead_a_cells)
 
-    stage_rows.append(["Total", "", f"{tot_pts:.4f}", f"{float(me['%']):.2f}%", "", f"{tot_time:.2f}"]
-                      + [str(tot[k]) for k in ["A", "C", "D", "M", "NS", "FTE", "P"]])
-    stage_header = ["Stage", "Rank", "Pts", "%", "HF", "Time", "A", "C", "D", "M", "NS", "FTE", "P"]
+    div_rows.append(["Total", "", f"{tot_pts_d:.4f}", f"{float(me_d['%']):.2f}%", "", f"{tot_time:.2f}"]
+                    + [str(tot[k]) for k in ["A", "C", "D", "M", "NS", "P"]])
+    all_rows.append(["Total", "", f"{tot_pts_a:.4f}", f"{float(me_a['%']):.2f}%", ""])
+    stage_header = ["Stage", "Rank", "Pts", "%", "HF", "Time", "A", "C", "D", "M", "NS", "P"]
+    all_header = ["Stage", "Rank", "Pts", "%", "HF"]
 
     # ---- derived statistics
     on_target, rounds = tot["A"] + tot["C"] + tot["D"], tot["A"] + tot["C"] + tot["D"] + tot["M"]
@@ -1042,34 +1079,43 @@ def build_player_report(name, df_overall, stage_tables, stage_names, scores):
     best = max(scored, key=lambda x: x["pct"]) if scored else None
     worst = min(scored, key=lambda x: x["pct"]) if scored else None
     n_scored = len(scored)
+    pen_count = tot["M"] + tot["NS"] + tot["P"]
     highlights = [
         ("Alpha Rate (A of A+C+D+M)", pct(tot["A"], rounds)),
         ("Hit Rate (A+C+D of A+C+D+M)", pct(on_target, rounds)),
-        ("Penalties (M+NS+FTE+P)", str(tot["M"] + tot["NS"] + tot["FTE"] + tot["P"])),
-        ("Penalty Points Deducted", str(10 * (tot["M"] + tot["NS"] + tot["FTE"] + tot["P"]))),
-        ("Stages Won", str(sum(1 for x in scored if x["rank"] == 1))),
-        ("Podium Finishes (Top 3)", str(sum(1 for x in scored if x["rank"] <= 3))),
-        ("Average Stage %", f"{sum(x['pct'] for x in scored) / n_scored:.2f}%" if n_scored else "-"),
+        ("Penalties (M+NS+P)", str(pen_count)),
+        ("Penalty Points Deducted", str(10 * pen_count)),
+        ("Stages Won (in division)", str(sum(1 for x in scored if x["rank"] == 1))),
+        ("Podium Finishes (Top 3, in division)", str(sum(1 for x in scored if x["rank"] <= 3))),
+        ("Average Stage % (division)", f"{sum(x['pct'] for x in scored) / n_scored:.2f}%" if n_scored else "-"),
+        ("Average Stage % (all divisions)", f"{sum(x['pct_all'] for x in scored) / n_scored:.2f}%" if n_scored else "-"),
         ("Average Hit Factor", f"{sum(x['hf'] for x in scored) / n_scored:.4f}" if n_scored else "-"),
-        ("Best Stage", f"{best['stage']} ({best['pct']:.2f}%)" if best else "-"),
-        ("Weakest Stage", f"{worst['stage']} ({worst['pct']:.2f}%)" if worst else "-"),
+        ("Best Stage (division)", f"{best['stage']} ({best['pct']:.2f}%)" if best else "-"),
+        ("Weakest Stage (division)", f"{worst['stage']} ({worst['pct']:.2f}%)" if worst else "-"),
     ]
     profile = [
-        ("Competitor", name), ("Competitor #", str(me["#"])),
-        ("Category", me["Cat"] or "-"), ("Class", me["Cls"] or "-"),
-        ("Region", me["Reg"] or "-"), ("Tag", me["Tag"] or "-"),
-        ("ICS", me["ICS"] or "-"), ("Power Factor", me["Power"]),
+        ("Competitor", name), ("Competitor #", str(me_d["#"])),
+        ("Division", div), ("Power Factor", me_d["Power"]),
+        ("Category", me_d["Cat"] or "-"), ("Class", me_d["Cls"] or "-"),
+        ("Region", me_d["Reg"] or "-"), ("Tag", me_d["Tag"] or "-"),
+        ("ICS", me_d["ICS"] or "-"), ("", ""),
     ]
-    overall = [
-        ("Overall Rank", f"{int(me['Rank'])} of {n_players}" + (" (tied)" if tied else "")),
-        ("Total Points", f"{float(me['Points']):.4f}"),
-        ("% of 1st Place", f"{float(me['%']):.2f}%"),
-        ("Points Behind 1st", f"{leader_pts - float(me['Points']):.4f}"),
-        ("Stages Scored", f"{n_scored} of {len(stage_names)}"),
-        ("Total Time", f"{tot_time:.2f} s"),
+    overall_div_kv = [
+        (f"Rank in {div}", f"{int(me_d['Rank'])} of {n_div}" + (" (tied)" if tied_d else "")),
+        ("Total Points (division)", f"{float(me_d['Points']):.4f}"),
+        ("% of 1st in Division", f"{float(me_d['%']):.2f}%"),
+        ("Points Behind 1st in Division", f"{lead_d - float(me_d['Points']):.4f}"),
     ]
+    overall_all_kv = [
+        ("Rank, All Divisions", f"{int(me_a['Rank'])} of {n_all}" + (" (tied)" if tied_a else "")),
+        ("Total Points (all divisions)", f"{float(me_a['Points']):.4f}"),
+        ("% of 1st, All Divisions", f"{float(me_a['%']):.2f}%"),
+        ("Points Behind 1st, All Divisions", f"{lead_a - float(me_a['Points']):.4f}"),
+    ]
+    overall = overall_div_kv + overall_all_kv + [
+        ("Stages Scored", f"{n_scored} of {len(stage_names)}"), ("Total Time", f"{tot_time:.2f} s")]
     hit_total = sum(tot[k] for k in HIT_ORDER)
-    hit_header = ["A", "C", "D", "M", "NS", "FTE", "P"]
+    hit_header = ["A", "C", "D", "M", "NS", "P"]
     hit_rows = [[str(tot[k]) for k in hit_header],
                 [pct(tot[k], hit_total) if k != "P" else "-" for k in hit_header]]
     png = make_hits_pie_png({k: tot[k] for k in HIT_ORDER})
@@ -1078,34 +1124,44 @@ def build_player_report(name, df_overall, stage_tables, stage_names, scores):
         ("heading", "Competitor Profile"), ("kv", profile, 2),
         ("heading", "Overall Result"), ("kv", overall, 2),
         ("heading", "Hit Summary"),
-        ("table", {"header": hit_header, "rows": [["%s" % c for c in r] for r in hit_rows], "aligns": ["C"] * 7}),
-        ("note", "A includes steel hits. The second row shows each count as a share of A + C + D + M + NS + FTE. "
+        ("table", {"header": hit_header, "rows": hit_rows, "aligns": ["C"] * 6}),
+        ("note", "A includes steel hits. The second row shows each count as a share of A + C + D + M + NS. "
                  "P = procedural penalties (counted here, not charted)."),
     ]
     if png:
         sections += [("heading", "Hit Distribution"), ("image", png, PIE_WIDTH_IN),
-                     ("note", "Pie shows hits only: Alpha, Charlie, Delta, Mike, No-Shoot and Failure to Engage.")]
+                     ("note", "Pie shows hits only: Alpha, Charlie, Delta, Mike and No-Shoot.")]
     sections += [
-        ("heading", "Stage-by-Stage Breakdown"),
-        ("table", {"header": stage_header, "rows": stage_rows, "bold_last": True, "flex": 0,
-                   "aligns": ["L", "C", "R", "R", "R", "R", "C", "C", "C", "C", "C", "C", "C"]}),
-        ("note", "Rank = placing on that stage (of all active competitors). Pts = stage points. % = share of the stage winner's "
-                 "hit factor (Total row: share of the overall leader's points). HF = hit factor."),
-        ("heading", "Performance Highlights"), ("kv", highlights, 2),
+        ("pagebreak",),
+        ("heading", f"Stage-by-Stage Breakdown - {div} Division"),
+        ("table", {"header": stage_header, "rows": div_rows, "bold_last": True, "flex": 0,
+                   "aligns": ["L", "C", "R", "R", "R", "R", "C", "C", "C", "C", "C", "C"]}),
+        ("note", "Rank = placing on that stage among competitors in the same division. Pts = stage points. % = share of the "
+                 "division stage winner's hit factor (Total row: share of the division leader's points). HF = hit factor."),
+        ("heading", "Stage-by-Stage Results - All Divisions"),
+        ("table", {"header": all_header, "rows": all_rows, "bold_last": True, "flex": 0,
+                   "aligns": ["L", "C", "R", "R", "R"]}),
+        ("note", "Rank, Pts and % here compare the competitor against everyone in the match, regardless of division."
+                 + (" Stages marked * are ICS classifier stages excluded from the overall totals." if excluded else "")),
+        ("heading", "Performance Highlights"), ("kv", highlights + [("", "")] * (len(highlights) % 2), 2),
     ]
 
-    # flat copy of every figure in the report; its fingerprint goes in the footer like the other exports
     facts = ([("Profile", a, b) for a, b in profile] + [("Overall", a, b) for a, b in overall]
              + [("Hits", h, str(tot[h])) for h in hit_header]
-             + [("Stage", r[0], " | ".join(r[1:])) for r in stage_rows]
+             + [("Stage (division)", r[0], " | ".join(r[1:])) for r in div_rows]
+             + [("Stage (all)", r[0], " | ".join(r[1:])) for r in all_rows]
              + [("Highlight", a, b) for a, b in highlights])
     return {
-        "name": name, "rank": int(me["Rank"]), "n_players": n_players, "tied": tied,
-        "points": float(me["Points"]), "percent": float(me["%"]), "behind": leader_pts - float(me["Points"]),
+        "name": name, "division": div,
+        "rank_div": int(me_d["Rank"]), "n_div": n_div, "tied_div": tied_d,
+        "rank_all": int(me_a["Rank"]), "n_all": n_all, "tied_all": tied_a,
+        "points_div": float(me_d["Points"]), "percent_div": float(me_d["%"]), "behind_div": lead_d - float(me_d["Points"]),
+        "points_all": float(me_a["Points"]), "percent_all": float(me_a["%"]), "behind_all": lead_a - float(me_a["Points"]),
         "totals": tot, "total_time": tot_time, "png": png, "highlights": highlights,
-        "stage_header": stage_header, "stage_rows": stage_rows, "sections": sections,
+        "stage_header": stage_header, "stage_rows": div_rows, "all_header": all_header, "all_rows": all_rows,
+        "sections": sections,
         "facts_df": pd.DataFrame(facts, columns=["Section", "Field", "Value"]),
-        "num": int(me["#"]),
+        "num": int(me_d["#"]),
     }
 
 
@@ -1214,6 +1270,8 @@ def _docx_add_sections(doc, sections, usable_in):
                     for c in row.cells:
                         for para in c.paragraphs:
                             para.paragraph_format.keep_with_next = True
+        elif kind == "pagebreak":
+            doc.add_page_break()
         elif kind == "note":
             para = doc.add_paragraph()
             para.paragraph_format.space_before = Pt(2)
@@ -1229,7 +1287,7 @@ def _docx_add_sections(doc, sections, usable_in):
 
 
 def _pdf_sections(sections, usable_in, reg, bold):
-    from reportlab.platypus import KeepTogether
+    from reportlab.platypus import KeepTogether, PageBreak
     flow = []
     amap = {"L": TA_LEFT, "C": TA_CENTER, "R": 2}      # 2 = reportlab's TA_RIGHT
     for sec in sections:
@@ -1266,6 +1324,8 @@ def _pdf_sections(sections, usable_in, reg, bold):
                 style.append(("BACKGROUND", (c, 0), (c, -1), colors.HexColor("#F2F2F2")))
             t.setStyle(TableStyle(style))
             flow.append(KeepTogether([t]) if len(data) <= 25 else t)
+        elif kind == "pagebreak":
+            flow.append(PageBreak())
         elif kind == "note":
             flow.append(Paragraph(_xml_escape(sec[1]), ParagraphStyle(
                 "sec_n", fontName=reg, fontSize=7.5, leading=9, textColor=colors.HexColor("#555555"), spaceBefore=3)))
@@ -1406,7 +1466,7 @@ def build_pdf(lines, df, logo_left=None, logo_right=None, sections=None, footer_
 
 
     # ---- footer (bottom-left): export date/time + report info, page numbers on the right
-    f1, f2 = _export_footer_lines(lines, footer_df if footer_df is not None else df)
+    f1, f2, f3 = _export_footer_lines(lines, footer_df if footer_df is not None else df)
 
     class _NumberedCanvas(rl_canvas.Canvas):
         """Two-pass canvas so the footer can say 'Page X of Y'."""
@@ -1429,17 +1489,18 @@ def build_pdf(lines, df, logo_left=None, logo_right=None, sections=None, footer_
         def _draw_footer(self, total):
             left = PAGE_MARGIN_IN * inch
             right = (PAGE_W_IN - PAGE_MARGIN_IN) * inch
+            max_w = right - left
             self.setFont(reg, FOOTER_PT)
             self.setFillColor(colors.HexColor("#444444"))
-            self.drawString(left, 0.42 * inch, f1)
-            self.drawRightString(right, 0.42 * inch, f"Page {self._pageNumber} of {total}")
-            line2 = f2
-            max_w = right - left
-            while pdfmetrics.stringWidth(line2, reg, FOOTER_PT) > max_w and len(line2) > 4:
-                line2 = line2[:-2]            # never let a long title run off the page
-            if line2 != f2:
-                line2 = line2.rstrip() + "…"
-            self.drawString(left, 0.30 * inch, line2)
+            self.drawString(left, 0.54 * inch, f1)
+            self.drawRightString(right, 0.54 * inch, f"Page {self._pageNumber} of {total}")
+            for text, y in ((f2, 0.42), (f3, 0.30)):
+                line = text
+                while pdfmetrics.stringWidth(line, reg, FOOTER_PT) > max_w and len(line) > 4:
+                    line = line[:-2]            # never let a long line run off the page
+                if line != text:
+                    line = line.rstrip() + "…"
+                self.drawString(left, y * inch, line)
 
     doc.build(story, canvasmaker=_NumberedCanvas)
     return buf.getvalue()
@@ -1460,310 +1521,627 @@ def pdf_export_button(container, label, file_name, lines, df, key=None, sections
 
 
 DIVISIONS = ["Production", "Production Optics", "Standard", "Standard Optics", "Classic", "Open", "Revolver", "PCC"]
+PF_MINOR_ONLY = {"Production", "Production Optics", "PCC"}
+MATCH_LEVELS = ["Level I", "Level II", "Level III", "Level IV", "Level V"]
+CAT_OPTIONS = ["", "L", "LS", "S", "SS", "GS", "J", "SJ"]
+CLS_OPTIONS = ["", "GM", "M", "A", "B", "C", "D", "U"]
+COURSE_TYPES = ["Short course, up to 12 rounds", "Medium course, up to 24 rounds", "Long course, up to 32 rounds"]
+COURSE_CAPS = {COURSE_TYPES[0]: 12, COURSE_TYPES[1]: 24, COURSE_TYPES[2]: 32}
+
+COUNTRIES = [c.strip() for c in """Philippines; Afghanistan; Albania; Algeria; Andorra; Angola; Antigua and Barbuda; Argentina; Armenia;
+Australia; Austria; Azerbaijan; Bahamas; Bahrain; Bangladesh; Barbados; Belarus; Belgium; Belize; Benin; Bhutan; Bolivia;
+Bosnia and Herzegovina; Botswana; Brazil; Brunei; Bulgaria; Burkina Faso; Burundi; Cabo Verde; Cambodia; Cameroon; Canada;
+Central African Republic; Chad; Chile; China; Colombia; Comoros; Congo (Republic); Congo (DR); Costa Rica; Croatia; Cuba;
+Cyprus; Czechia; Denmark; Djibouti; Dominica; Dominican Republic; Ecuador; Egypt; El Salvador; Equatorial Guinea; Eritrea;
+Estonia; Eswatini; Ethiopia; Fiji; Finland; France; Gabon; Gambia; Georgia; Germany; Ghana; Greece; Grenada; Guatemala;
+Guinea; Guinea-Bissau; Guyana; Haiti; Honduras; Hong Kong; Hungary; Iceland; India; Indonesia; Iran; Iraq; Ireland; Israel;
+Italy; Ivory Coast; Jamaica; Japan; Jordan; Kazakhstan; Kenya; Kiribati; Kosovo; Kuwait; Kyrgyzstan; Laos; Latvia; Lebanon;
+Lesotho; Liberia; Libya; Liechtenstein; Lithuania; Luxembourg; Macau; Madagascar; Malawi; Malaysia; Maldives; Mali; Malta;
+Marshall Islands; Mauritania; Mauritius; Mexico; Micronesia; Moldova; Monaco; Mongolia; Montenegro; Morocco; Mozambique;
+Myanmar; Namibia; Nauru; Nepal; Netherlands; New Zealand; Nicaragua; Niger; Nigeria; North Korea; North Macedonia; Norway;
+Oman; Pakistan; Palau; Palestine; Panama; Papua New Guinea; Paraguay; Peru; Poland; Portugal; Puerto Rico; Qatar; Romania;
+Russia; Rwanda; Saint Kitts and Nevis; Saint Lucia; Saint Vincent and the Grenadines; Samoa; San Marino;
+Sao Tome and Principe; Saudi Arabia; Senegal; Serbia; Seychelles; Sierra Leone; Singapore; Slovakia; Slovenia;
+Solomon Islands; Somalia; South Africa; South Korea; South Sudan; Spain; Sri Lanka; Sudan; Suriname; Sweden; Switzerland;
+Syria; Taiwan; Tajikistan; Tanzania; Thailand; Timor-Leste; Togo; Tonga; Trinidad and Tobago; Tunisia; Turkey; Turkmenistan;
+Tuvalu; Uganda; Ukraine; United Arab Emirates; United Kingdom; United States; Uruguay; Uzbekistan; Vanuatu; Vatican City;
+Venezuela; Vietnam; Yemen; Zambia; Zimbabwe""".replace("\n", " ").split(";") if c.strip()]
+
+PH_PROVINCES = [p.strip() for p in """Abra; Agusan del Norte; Agusan del Sur; Aklan; Albay; Antique; Apayao; Aurora; Basilan; Bataan;
+Batanes; Batangas; Benguet; Biliran; Bohol; Bukidnon; Bulacan; Cagayan; Camarines Norte; Camarines Sur; Camiguin; Capiz;
+Catanduanes; Cavite; Cebu; Cotabato; Davao de Oro; Davao del Norte; Davao del Sur; Davao Occidental; Davao Oriental;
+Dinagat Islands; Eastern Samar; Guimaras; Ifugao; Ilocos Norte; Ilocos Sur; Iloilo; Isabela; Kalinga; La Union; Laguna;
+Lanao del Norte; Lanao del Sur; Leyte; Maguindanao del Norte; Maguindanao del Sur; Marinduque; Masbate; Metro Manila (NCR);
+Misamis Occidental; Misamis Oriental; Mountain Province; Negros Occidental; Negros Oriental; Northern Samar; Nueva Ecija;
+Nueva Vizcaya; Occidental Mindoro; Oriental Mindoro; Palawan; Pampanga; Pangasinan; Quezon; Quirino; Rizal; Romblon; Samar;
+Sarangani; Siquijor; Sorsogon; South Cotabato; Southern Leyte; Sultan Kudarat; Sulu; Surigao del Norte; Surigao del Sur;
+Tarlac; Tawi-Tawi; Zambales; Zamboanga del Norte; Zamboanga del Sur; Zamboanga Sibugay""".replace("\n", " ").split(";") if p.strip()]
+
+
+def power_options(division):
+    return ["Minor"] if division in PF_MINOR_ONLY else ["Major", "Minor"]
+
+
+def power_ok(division, power):
+    return not (division in PF_MINOR_ONLY and power == "Major")
+
 
 # ==========================================
 # SESSION STATE INITIALISATION
 # ==========================================
-if "competitors_list" not in st.session_state:
-    st.session_state.competitors_list = []
-if "scores" not in st.session_state:
-    st.session_state.scores = {}
-if "uploader_n" not in st.session_state:
-    st.session_state.uploader_n = 0
-st.session_state.setdefault("form_ver", 0)
-
-st.session_state.setdefault("match_name", "MPRAI CLUBSHOOT")
-st.session_state.setdefault("match_date", date.today())
-st.session_state.setdefault("division", DIVISIONS[0])
-st.session_state.setdefault("num_stages", 1)
+ss = st.session_state
+ss.setdefault("competitors_list", [])
+ss.setdefault("scores", {})
+ss.setdefault("uploader_n", 0)
+ss.setdefault("form_ver", 0)
+ss.setdefault("match_name", "MPRAI CLUBSHOOT")
+ss.setdefault("match_date", date.today())
+ss.setdefault("country", "Philippines")
+ss.setdefault("province", "Metro Manila (NCR)")
+ss.setdefault("province_text", "")
+ss.setdefault("match_level", MATCH_LEVELS[0])
+ss.setdefault("range_master", "")
+ss.setdefault("match_director", "")
+ss.setdefault("num_stages", 1)
+ss.setdefault("member_list", [])
+ss.setdefault("member_uploader_n", 0)
 
 # ==========================================
-# APPLY A PENDING MATCH LOAD (must run BEFORE the sidebar widgets are created)
+# APPLY A PENDING MATCH LOAD (must run BEFORE any widgets are created)
 # ==========================================
-if "pending_load" in st.session_state:
-    data = st.session_state.pop("pending_load")
-    st.session_state["form_ver"] += 1  # fresh widget keys -> score/edit forms re-read the loaded data
+if "pending_load" in ss:
+    data = ss.pop("pending_load")
+    ss["form_ver"] += 1  # fresh widget keys -> score/edit forms re-read the loaded data
     for side in ("left", "right"):
         b64 = (data.get("logos") or {}).get(side)
         if b64:
             try:
-                st.session_state[f"logo_{side}"] = base64.b64decode(b64)
+                ss[f"logo_{side}"] = base64.b64decode(b64)
             except Exception:
                 pass
 
-    st.session_state.competitors_list = data.get("competitors", [])
+    loaded_comps = data.get("competitors", [])
+    for c in loaded_comps:
+        c.setdefault("Division", DIVISIONS[0])
+    ss.competitors_list = loaded_comps
 
     parsed_scores = {}
     for k, v in data.get("scores", {}).items():
         if "|||" in k:
             s_key, comp_key = k.split("|||", 1)
             parsed_scores[(s_key, comp_key)] = v
-    st.session_state.scores = parsed_scores
+    ss.scores = parsed_scores
 
     if data.get("match_name"):
-        st.session_state["match_name"] = data["match_name"]
-
+        ss["match_name"] = data["match_name"]
     if data.get("match_date"):
         try:
-            st.session_state["match_date"] = date.fromisoformat(data["match_date"])
+            ss["match_date"] = date.fromisoformat(data["match_date"])
         except ValueError:
             pass
-
-    if data.get("division") in DIVISIONS:
-        st.session_state["division"] = data["division"]
+    if data.get("country") in COUNTRIES:
+        ss["country"] = data["country"]
+    if data.get("province"):
+        if data.get("country", "Philippines") == "Philippines" and data["province"] in PH_PROVINCES:
+            ss["province"] = data["province"]
+        else:
+            ss["province_text"] = data["province"]
+    if data.get("match_level") in MATCH_LEVELS:
+        ss["match_level"] = data["match_level"]
+    ss["range_master"] = data.get("range_master", "")
+    ss["match_director"] = data.get("match_director", "")
 
     stages = data.get("stages", [])
     if stages:
-        st.session_state["num_stages"] = max(1, min(20, len(stages)))
+        ss["num_stages"] = max(1, min(20, len(stages)))
         for idx, stg in enumerate(stages[:20], 1):
-            st.session_state[f"s_name_{idx}"] = stg.get("title", f"Stage {idx}")
-            st.session_state[f"p_{idx}"] = int(stg.get("paper", 0))
-            st.session_state[f"st_{idx}"] = int(stg.get("steel", 0))
+            ss[f"s_name_{idx}"] = stg.get("title", f"Stage {idx}")
+            ss[f"s_loc_{idx}"] = stg.get("location", "")
+            ss[f"s_course_{idx}"] = stg.get("course") if stg.get("course") in COURSE_TYPES else COURSE_TYPES[0]
+            ss[f"p_{idx}"] = int(stg.get("paper", 0))
+            ss[f"pl_{idx}"] = int(stg.get("plates", 0))
+            ss[f"po_{idx}"] = int(stg.get("poppers", 0))
+            ss[f"dis_{idx}"] = int(stg.get("disappearing", 0))
+            ss[f"pen_{idx}"] = int(stg.get("penalty", 0))
+            ss[f"minr_{idx}"] = int(stg.get("min_rounds", 0))
+            ss[f"ics_{idx}"] = bool(stg.get("ics", False))
+            ss[f"excl_{idx}"] = bool(stg.get("exclude", False))
 
 # ==========================================
 # APPLY A PENDING RENAME (keeps competitor dropdown selections pointing at the renamed person)
 # ==========================================
-if "pending_rename" in st.session_state:
-    old_n, new_n = st.session_state.pop("pending_rename")
-    for k in list(st.session_state.keys()):
-        if isinstance(k, str) and k.startswith(("select_", "inspect_")) and st.session_state[k] == old_n:
-            st.session_state[k] = new_n
+if "pending_rename" in ss:
+    old_n, new_n = ss.pop("pending_rename")
+    for k in list(ss.keys()):
+        if isinstance(k, str) and k.startswith(("select_", "inspect_")) and ss[k] == old_n:
+            ss[k] = new_n
 
 # ==========================================
-# SIDEBAR: MATCH SETUP & CONFIGURATION
+# STAGE CONFIGURATION (read from session state; edited in the "Stage Set-up" tab)
 # ==========================================
-st.sidebar.header("⚙️ Match Configuration")
+num_stages = int(ss["num_stages"])
+for s in range(1, num_stages + 1):
+    ss.setdefault(f"s_name_{s}", f"Stage {s}")
+    ss.setdefault(f"s_loc_{s}", "")
+    ss.setdefault(f"s_course_{s}", COURSE_TYPES[0])
+    for k in ("p", "pl", "po", "dis", "pen", "minr"):
+        ss.setdefault(f"{k}_{s}", 0)
+    ss.setdefault(f"ics_{s}", False)
+    ss.setdefault(f"excl_{s}", False)
 
-match_name = st.sidebar.text_input("Match Name", key="match_name")
-match_date = st.sidebar.date_input("Match Date", key="match_date")
+stage_names, stage_config = [], {}
+for s in range(1, num_stages + 1):
+    title = str(ss[f"s_name_{s}"])
+    paper, plates, poppers = int(ss[f"p_{s}"]), int(ss[f"pl_{s}"]), int(ss[f"po_{s}"])
+    dis, pen, minr = int(ss[f"dis_{s}"]), int(ss[f"pen_{s}"]), int(ss[f"minr_{s}"])
+    total_rounds = (paper + dis) * 2 + plates + poppers          # rounds needed for full marks
+    score_cap = min(minr, total_rounds) if minr > 0 else total_rounds   # A+C+D can never exceed this
+    ics = bool(ss[f"ics_{s}"])
+    stage_names.append(title)
+    stage_config[title] = {
+        "idx": s, "title": title, "location": str(ss[f"s_loc_{s}"]), "course": ss[f"s_course_{s}"],
+        "paper": paper, "plates": plates, "poppers": poppers, "disappearing": dis, "penalty": pen,
+        "min_rounds": minr, "total_rounds": total_rounds, "score_cap": score_cap,
+        "max_pts": total_rounds * 5, "ics": ics, "exclude": ics and bool(ss[f"excl_{s}"]),
+    }
+title_problem = len(set(stage_names)) != len(stage_names) or any(not n.strip() for n in stage_names)
+excluded_stages = {n for n in stage_names if stage_config[n]["exclude"]}
+included_stages = [n for n in stage_names if n not in excluded_stages]
 
-division = st.sidebar.selectbox("Division", DIVISIONS, key="division")
+match_name = ss["match_name"]
+match_date = ss["match_date"]
 
-# Auto-set Power Factor rule per Division
-if division in ["Production", "Production Optics", "PCC"]:
-    st.sidebar.info(f"ℹ️ {division} is restricted to **Minor** scoring.")
-    default_power_options = ["Minor"]
-else:
-    default_power_options = ["Major", "Minor"]
-
-with st.sidebar.form("num_stages_form", border=False):
-    st.number_input("How many stages?", min_value=1, max_value=20, key="num_stages")
-    st.form_submit_button("✅ Apply number of stages")
-num_stages = st.session_state["num_stages"]   # only changes when Apply is pressed
-
-# Custom Stage Names & Targets
-st.sidebar.header("📋 Stage Names & Targets")
-stage_names = []
-stage_config = {}
-
-for s in range(1, int(num_stages) + 1):
-    st.session_state.setdefault(f"s_name_{s}", f"Stage {s}")
-    st.session_state.setdefault(f"p_{s}", 0)
-    st.session_state.setdefault(f"st_{s}", 0)
-
-    with st.sidebar.expander(f"Stage {s} Setup", expanded=(s == 1)):
-        with st.form(f"stage_form_{s}", border=False):
-            st.text_input(f"Stage {s} Title", key=f"s_name_{s}")
-            st.number_input("Paper Targets", min_value=0, key=f"p_{s}")
-            st.number_input("Steel Plates & Poppers", min_value=0, key=f"st_{s}")
-            st.form_submit_button(f"✅ Apply Stage {s}")
-        # Values only change when Apply is pressed
-        custom_s_name = st.session_state[f"s_name_{s}"]
-        paper = int(st.session_state[f"p_{s}"])
-        steel = int(st.session_state[f"st_{s}"])
-
-        max_stage_points = (paper * 2 + steel) * 5
-        total_rounds = (paper * 2) + steel
-        stage_names.append(custom_s_name)
-        stage_config[custom_s_name] = {
-            "paper": paper,
-            "steel": steel,
-            "max_pts": max_stage_points,
-            "total_rounds": total_rounds
-        }
-        st.caption(f"Max Points: **{max_stage_points} pts** | Total Rounds: **{total_rounds}**")
-
-if len(set(stage_names)) != len(stage_names) or any(not n.strip() for n in stage_names):
-    st.sidebar.error("⚠️ Every stage needs its own non-empty title. Duplicate or blank titles will mix up scores.")
 
 # ==========================================
-# DATA PERSISTENCE (SAVE / LOAD MATCH)
+# SCORING ENGINE
 # ==========================================
-st.sidebar.divider()
-st.sidebar.header("🖼️ Logos for Word Exports")
-st.sidebar.caption("Your PPSA (left) and MPRAI (right) logos are built in and appear on every Word export. Upload a file below only if you want to replace one.")
-for side, label in (("left", "Left logo"), ("right", "Right logo")):
-    up = st.sidebar.file_uploader(f"{label} (PNG/JPG)", type=["png", "jpg", "jpeg"], key=f"logo_up_{side}")
-    if up is not None:
-        sig = (up.name, up.size)
-        if st.session_state.get(f"logo_{side}_sig") != sig:   # apply each new file once
-            try:
-                st.session_state[f"logo_{side}"] = process_logo(up.getvalue())
-                st.session_state[f"logo_{side}_sig"] = sig
-            except Exception as e:
-                st.sidebar.error(f"Couldn't read that image: {e}")
-    preview = st.session_state.get(f"logo_{side}") or default_logo(side)
-    if preview:
-        st.sidebar.image(preview, width=90)
-    if st.session_state.get(f"logo_{side}"):
-        if st.sidebar.button(f"Remove {label.lower()}", key=f"logo_rm_{side}"):
-            st.session_state.pop(f"logo_{side}", None)
-            st.rerun()
-logo_left = st.session_state.get("logo_left") or default_logo("left")
-logo_right = st.session_state.get("logo_right") or default_logo("right")
+def calc_points(power, s):
+    """(raw points before deductions, deductions, net points). Steel hits are A's; FTE is a legacy procedural."""
+    major = (power == "Major")
+    c_pts, d_pts = (4, 2) if major else (3, 1)
+    a_total = s.get("A", 0) + s.get("steel", 0)
+    raw = a_total * 5 + s.get("C", 0) * c_pts + s.get("D", 0) * d_pts
+    ded = 10 * (s.get("M", 0) + s.get("NS", 0) + s.get("Proc", 0) + s.get("FTE", 0))
+    return raw, ded, max(0, raw - ded)
 
-st.sidebar.divider()
-st.sidebar.header("💾 Match Data Persistence")
 
-# Export Match State (everything: settings, stages, targets, roster, scores)
+def _scope_rank(values, groups):
+    """values: exact Fractions; groups: group label per value. Returns (ratio-to-group-best, rank-in-group)."""
+    n = len(values)
+    ratio, rank = [Fraction(0)] * n, [0] * n
+    by = {}
+    for i, g in enumerate(groups):
+        by.setdefault(g, []).append(i)
+    for idxs in by.values():
+        vals = [values[i] for i in idxs]
+        mx = max(vals)
+        for i, r in zip(idxs, rank_min(vals)):
+            rank[i] = r
+            ratio[i] = values[i] / mx if mx > 0 else Fraction(0)
+    return ratio, rank
+
+
+def build_stage_table(s_name, active, scores, cfg, per_division):
+    """Stage table for one stage. per_division=True: best HF is taken within each division;
+    False: best HF is taken across everyone. Exact fractions throughout; rounding is display-only."""
+    recs = []
+    for c in active:
+        name = c["Competitor"]
+        s = scores.get((s_name, name))
+        zero_time = False
+        if s and s.get("DNF", False):
+            raw = ded = net = 0
+            hf, t = Fraction(0), s.get("time", 0.0)
+        elif s and s.get("time", 0) > 0:
+            raw, ded, net = calc_points(c["Power"], s)
+            hf, t = Fraction(net) / Fraction(str(s["time"])), s["time"]
+        else:
+            raw = ded = net = 0
+            hf, t = Fraction(0), 0.0
+            zero_time = bool(s)
+        s = s or {}
+        recs.append({
+            "Rank": 0, "Stage %": 0.0, "Stage Points": 0.0, "#": c["#"], "Competitor": name,
+            "Division": c.get("Division", DIVISIONS[0]),
+            "Cat": c["Cat"], "Reg": c["Reg"], "Cls": c["Cls"], "Tag": c["Tag"], "ICS": c["ICS"],
+            "Raw Points": raw, "Deductions": ded, "Net Points": net, "Raw Time": t,
+            "HF_exact": hf, "Hit Factor": float(hf), "Power": c["Power"],
+            "A": s.get("A", 0) + s.get("steel", 0), "C": s.get("C", 0), "D": s.get("D", 0),
+            "M": s.get("M", 0), "NS": s.get("NS", 0), "Proc": s.get("Proc", 0) + s.get("FTE", 0),
+            "ZeroTime": zero_time,
+        })
+    df = pd.DataFrame(recs)
+    if df.empty:
+        return df
+    groups = df["Division"].tolist() if per_division else ["ALL"] * len(df)
+    ratio, rank = _scope_rank(df["HF_exact"].tolist(), groups)
+    pts = [r * int(cfg["max_pts"]) for r in ratio]
+    df["Pts_exact"] = pts
+    df["Stage Points"] = [float(p) for p in pts]
+    df["Stage %"] = [float(r * 100) for r in ratio]
+    df["Rank"] = rank
+    div_order = {d: i for i, d in enumerate(DIVISIONS)}
+    order = sorted(range(len(df)), key=lambda i: (div_order.get(df.at[i, "Division"], 99) if per_division else 0,
+                                                  -df.at[i, "HF_exact"], df.at[i, "#"]))
+    return df.iloc[order].reset_index(drop=True)
+
+
+def build_overall(active, tables, included, per_division):
+    """Sum of exact stage points over the included stages, ranked in its scope."""
+    totals = {c["Competitor"]: Fraction(0) for c in active}
+    for s in included:
+        df = tables.get(s)
+        if df is None or df.empty:
+            continue
+        for nm, p in zip(df["Competitor"], df["Pts_exact"]):
+            totals[nm] += p
+    df = pd.DataFrame(active).copy()
+    if "Division" not in df:
+        df["Division"] = DIVISIONS[0]
+    vals = [totals[n] for n in df["Competitor"]]
+    groups = df["Division"].tolist() if per_division else ["ALL"] * len(df)
+    ratio, rank = _scope_rank(vals, groups)
+    df["Pts_exact"] = vals
+    df["Points"] = [float(v) for v in vals]
+    df["%"] = [float(r * 100) for r in ratio]
+    df["Rank"] = rank
+    div_order = {d: i for i, d in enumerate(DIVISIONS)}
+    order = sorted(range(len(df)), key=lambda i: (div_order.get(df.at[i, "Division"], 99) if per_division else 0,
+                                                  -vals[i], df.at[i, "#"]))
+    return df.iloc[order].reset_index(drop=True)
+
+
+def cum_hits(name):
+    t = {"A": 0, "C": 0, "D": 0, "M": 0, "NS": 0, "P": 0, "time": 0.0}
+    for s_name in stage_names:
+        s = ss.scores.get((s_name, name))
+        if s:
+            t["A"] += s.get("A", 0) + s.get("steel", 0)
+            t["C"] += s.get("C", 0)
+            t["D"] += s.get("D", 0)
+            t["M"] += s.get("M", 0)
+            t["NS"] += s.get("NS", 0)
+            t["P"] += s.get("Proc", 0) + s.get("FTE", 0)
+            t["time"] += s.get("time", 0.0)
+    return t
+
+
+active_competitors = [c for c in ss.competitors_list if not c["DQ"]]
+can_score = (not title_problem) and bool(active_competitors)
+stage_div, stage_all = {}, {}
+overall_div = overall_all = pd.DataFrame()
+if can_score:
+    for s in stage_names:
+        stage_div[s] = build_stage_table(s, active_competitors, ss.scores, stage_config[s], True)
+        stage_all[s] = build_stage_table(s, active_competitors, ss.scores, stage_config[s], False)
+    overall_div = build_overall(active_competitors, stage_div, included_stages, True)
+    overall_all = build_overall(active_competitors, stage_all, included_stages, False)
+divisions_present = [d for d in DIVISIONS if any(c.get("Division") == d for c in active_competitors)]
+
+
+def date_line():
+    return f"Date: {match_date.strftime('%B %d, %Y')}"
+
+
+def safe(s):
+    return str(s).replace("/", "-").replace("\\", "-")
+
+
+# ==========================================
+# SIDEBAR (collapsible): MATCH DATA PERSISTENCE + MEMBER LIST
+# ==========================================
 match_state_data = {
-    "version": 2,
+    "version": 3,
     "match_name": match_name,
     "match_date": match_date.isoformat(),
-    "division": division,
-    "num_stages": int(num_stages),
+    "country": ss["country"],
+    "province": ss["province"] if ss["country"] == "Philippines" else ss["province_text"],
+    "match_level": ss["match_level"],
+    "range_master": ss["range_master"],
+    "match_director": ss["match_director"],
+    "num_stages": num_stages,
     "stages": [
-        {
-            "title": n,
-            "paper": int(stage_config[n]["paper"]),
-            "steel": int(stage_config[n]["steel"]),
-        }
+        {k: stage_config[n][k] for k in ("title", "location", "course", "paper", "plates", "poppers",
+                                         "disappearing", "penalty", "min_rounds", "ics", "exclude")}
         for n in stage_names
     ],
     "logos": {
-        side: base64.b64encode(st.session_state[f"logo_{side}"]).decode()
-        for side in ("left", "right") if st.session_state.get(f"logo_{side}")
+        side: base64.b64encode(ss[f"logo_{side}"]).decode()
+        for side in ("left", "right") if ss.get(f"logo_{side}")
     },
-    "competitors": st.session_state.competitors_list,
-    "scores": {f"{k[0]}|||{k[1]}": v for k, v in st.session_state.scores.items()}
+    "competitors": ss.competitors_list,
+    "scores": {f"{k[0]}|||{k[1]}": v for k, v in ss.scores.items()},
 }
-st.sidebar.download_button(
-    label="📥 Save Match State (JSON)",
-    data=json.dumps(match_state_data, indent=4),
-    file_name=f"{match_name}_{division}_backup.json",
-    mime="application/json"
-)
+# the "exclude" flag stored in a stage is only the effective one; keep the raw checkbox too
+for st_entry, n in zip(match_state_data["stages"], stage_names):
+    st_entry["exclude"] = bool(ss[f"excl_{stage_config[n]['idx']}"]) and stage_config[n]["ics"]
 
-# Import / Merge Match State
-st.sidebar.caption("Select one backup to load it, or several to combine them into a single match.")
-merge_into_current = st.sidebar.checkbox(
-    "Also merge with the current match (instead of replacing it)", value=False, key="merge_into_current"
-)
-uploaded_files = st.sidebar.file_uploader(
-    "📂 Load / Merge Match State (JSON)",
-    type=["json"],
-    accept_multiple_files=True,
-    key=f"uploader_{st.session_state.uploader_n}",
-)
-
-if uploaded_files:
-    if st.sidebar.button(f"🔀 Load {len(uploaded_files)} file(s)"):
-        load_ok = False
-        try:
-            datasets = []
-            if merge_into_current and (st.session_state.competitors_list or st.session_state.scores):
-                datasets.append(("current match", match_state_data))
-            for f in uploaded_files:
-                d = json.load(f)
-                if not isinstance(d, dict):
-                    raise ValueError(f"{f.name} is not a valid match state.")
-                datasets.append((f.name, d))
-
-            merged, merge_warnings = merge_match_states(datasets)
-            st.session_state["pending_load"] = merged
-            st.session_state["load_report"] = {
-                "summary": f"Loaded {len(datasets)} source(s): {len(merged['competitors'])} competitors, "
-                           f"{len(merged['scores'])} stage scores.",
-                "warnings": merge_warnings,
-            }
-            st.session_state.uploader_n += 1  # reset the uploader so it doesn't reload on every rerun
-            load_ok = True
-        except Exception as e:
-            st.sidebar.error(f"Error loading file(s): {e}")
-        if load_ok:
+st.sidebar.header("Tools")
+with st.sidebar.expander("💾 Match Data Persistence", expanded=False):
+    st.download_button(
+        label="📥 Save Match State (JSON)",
+        data=json.dumps(match_state_data, indent=4),
+        file_name=f"{match_name}_backup.json",
+        mime="application/json",
+    )
+    st.caption("Select one backup to load it, or several to combine them into a single match.")
+    merge_into_current = st.checkbox("Also merge with the current match (instead of replacing it)",
+                                     value=False, key="merge_into_current")
+    uploaded_files = st.file_uploader("📂 Load / Merge Match State (JSON)", type=["json"],
+                                      accept_multiple_files=True, key=f"uploader_{ss.uploader_n}")
+    if uploaded_files:
+        if st.button(f"🔀 Load {len(uploaded_files)} file(s)"):
+            load_ok = False
+            try:
+                datasets = []
+                if merge_into_current and (ss.competitors_list or ss.scores):
+                    datasets.append(("current match", match_state_data))
+                for f in uploaded_files:
+                    d = json.load(f)
+                    if not isinstance(d, dict):
+                        raise ValueError(f"{f.name} is not a valid match state.")
+                    datasets.append((f.name, d))
+                merged, merge_warnings = merge_match_states(datasets)
+                ss["pending_load"] = merged
+                ss["load_report"] = {
+                    "summary": f"Loaded {len(datasets)} source(s): {len(merged['competitors'])} competitors, "
+                               f"{len(merged['scores'])} stage scores.",
+                    "warnings": merge_warnings,
+                }
+                ss.uploader_n += 1
+                load_ok = True
+            except Exception as e:
+                st.error(f"Error loading file(s): {e}")
+            if load_ok:
+                st.rerun()
+    report = ss.get("load_report")
+    if report:
+        st.success(report["summary"])
+        for w in report["warnings"]:
+            st.warning(w)
+        if st.button("✖ Dismiss", key="dismiss_load_report"):
+            ss.pop("load_report", None)
             st.rerun()
 
-report = st.session_state.get("load_report")
-if report:
-    st.sidebar.success(report["summary"])
-    for w in report["warnings"]:
-        st.sidebar.warning(w)
-    if st.sidebar.button("✖ Dismiss", key="dismiss_load_report"):
-        st.session_state.pop("load_report", None)
+
+def _member_entry(c):
+    if isinstance(c, str):
+        c = {"Competitor": c}
+    if not isinstance(c, dict):
+        return None
+    name = str(c.get("Competitor", "")).strip()
+    if not name:
+        return None
+    div = c.get("Division") if c.get("Division") in DIVISIONS else DIVISIONS[0]
+    power = c.get("Power") if c.get("Power") in ("Major", "Minor") else "Minor"
+    if not power_ok(div, power):
+        power = "Minor"
+    return {"Competitor": name, "Division": div,
+            "Cat": c.get("Cat", "") if c.get("Cat", "") in CAT_OPTIONS else "",
+            "Reg": str(c.get("Reg", "PHI") or "PHI"),
+            "Cls": c.get("Cls", "") if c.get("Cls", "") in CLS_OPTIONS else "",
+            "Tag": str(c.get("Tag", "") or ""), "ICS": str(c.get("ICS", "") or ""), "Power": power}
+
+
+def _member_merge(entries):
+    have = {c["Competitor"].lower() for c in ss.member_list}
+    added = 0
+    for e in entries:
+        e = _member_entry(e)
+        if e and e["Competitor"].lower() not in have:
+            ss.member_list.append(e)
+            have.add(e["Competitor"].lower())
+            added += 1
+    ss.member_list.sort(key=lambda x: x["Competitor"].lower())
+    return added
+
+
+with st.sidebar.expander("🏷️ Member List", expanded=False):
+    st.caption("Regular shooters with all their roster details. Not part of the Roster until you click a name.")
+    with st.form("member_add_form", clear_on_submit=True):
+        m_name = st.text_input("Name")
+        m_div = st.selectbox("Division", DIVISIONS, key="m_div")
+        m_cat = st.selectbox("Cat", CAT_OPTIONS, key="m_cat")
+        m_reg = st.text_input("Reg", value="PHI")
+        m_cls = st.selectbox("Cls", CLS_OPTIONS, key="m_cls")
+        m_tag = st.text_input("Tag")
+        m_ics = st.text_input("ICS")
+        m_power = st.selectbox("Power", ["Minor", "Major"], key="m_power",
+                               help="Production, Production Optics and PCC are Minor only.")
+        if st.form_submit_button("➕ Add to Member List"):
+            if not m_name.strip():
+                st.error("Please enter a name.")
+            elif not power_ok(m_div, m_power):
+                st.error(f"{m_div} is restricted to Minor scoring.")
+            else:
+                n_added = _member_merge([{"Competitor": m_name, "Division": m_div, "Cat": m_cat, "Reg": m_reg,
+                                          "Cls": m_cls, "Tag": m_tag, "ICS": m_ics, "Power": m_power}])
+                ss["member_msg"] = "Added to the Member List." if n_added else f"{m_name.strip()} is already in the Member List."
+                st.rerun()
+
+    member_files = st.file_uploader(
+        "Load a saved Member List or any match backup (JSON)", type=["json"],
+        accept_multiple_files=True, key=f"member_up_{ss.member_uploader_n}")
+    if member_files and st.button(f"📂 Load {len(member_files)} file(s) into Member List", key="member_load_btn"):
+        total_new, errors = 0, []
+        for f in member_files:
+            try:
+                d = json.load(f)
+                items = (d.get("member_list") or d.get("club_list") or d.get("competitors") or []) if isinstance(d, dict) else d
+                total_new += _member_merge(items)
+            except Exception as e:
+                errors.append(f"{f.name}: {e}")
+        ss["member_msg"] = f"Loaded {total_new} new name(s)." + ("  Problems: " + "; ".join(errors) if errors else "")
+        ss.member_uploader_n += 1
         st.rerun()
+
+    if ss.get("member_msg"):
+        st.success(ss.pop("member_msg"))
+
+    if ss.member_list:
+        st.download_button(
+            "💾 Save Member List (JSON)",
+            data=json.dumps({"type": "member_list", "version": 2, "member_list": ss.member_list}, indent=4),
+            file_name="member_list.json", mime="application/json", key="member_save_btn")
+        st.markdown("**Click a name to add that shooter to the Roster**")
+        q = st.text_input("Filter names", key="member_filter", placeholder="Type to search...").strip().lower()
+        in_roster = {c["Competitor"].lower() for c in ss.competitors_list}
+        for c in [m for m in ss.member_list if q in m["Competitor"].lower()]:
+            already = c["Competitor"].lower() in in_roster
+            label = ("✓ " if already else "➕ ") + c["Competitor"] + f"  ({c['Division']})"
+            if st.button(label, key=f"member_pick_{c['Competitor']}", disabled=already, use_container_width=True):
+                next_num = max([int(x["#"]) for x in ss.competitors_list], default=0) + 1
+                ss.competitors_list.append({
+                    "#": next_num, "Competitor": c["Competitor"], "Division": c["Division"], "Cat": c["Cat"],
+                    "Reg": c["Reg"], "Cls": c["Cls"], "Tag": c["Tag"], "ICS": c["ICS"],
+                    "Power": c["Power"], "DQ": False})
+                st.rerun()
+        st.caption("Added shooters get the next free competitor #. Use Edit or Delete Competitor in the Roster tab to change details.")
+        with st.popover("🗑️ Remove names from the Member List"):
+            to_remove = st.multiselect("Select names to remove", [c["Competitor"] for c in ss.member_list], key="member_remove_sel")
+            if st.button("Remove selected", key="member_remove_btn") and to_remove:
+                ss.member_list = [c for c in ss.member_list if c["Competitor"] not in to_remove]
+                st.rerun()
+    else:
+        st.info("The Member List is empty. Add a member above or load a JSON.")
 
 # ==========================================
 # MAIN APP HEADER
 # ==========================================
 st.title(f"🎯 {match_name if match_name else 'IPSC Match Scoring'}")
-st.caption(f"Date: {match_date.strftime('%B %d, %Y')} | Division: **{division}**")
+_place = ss["country"] + (f", {ss['province'] if ss['country'] == 'Philippines' else ss['province_text']}"
+                          if (ss["province"] if ss["country"] == "Philippines" else ss["province_text"]) else "")
+st.caption(f"Date: {match_date.strftime('%B %d, %Y')} | {ss['match_level']} | {_place}")
 
-# ==========================================
-# TOP-LEVEL NAVIGATION TABS
-# ==========================================
-main_tab_roster, main_tab_scoring = st.tabs(["👤 Competitor Roster", "🎯 Match Scoring & Results"])
+(tab_cfg, main_tab_roster, tab_stage_setup, tab_scoring,
+ tab_stage_results, tab_overall, tab_hits) = st.tabs([
+    "⚙️ Match Configuration", "👤 Competitor Roster", "📋 Stage Set-up", "🎯 Match Scoring",
+    "📊 Stage Results", "🏆 Overall Results", "📈 Hit Breakdown and Graphs"])
 
 # ------------------------------------------
-# TAB 1: COMPETITOR ROSTER MANAGEMENT
+# TAB 1: MATCH CONFIGURATION
+# ------------------------------------------
+with tab_cfg:
+    st.header("⚙️ Match Configuration")
+    c1, c2 = st.columns(2)
+    with c1:
+        st.text_input("Match Name", key="match_name")
+        st.date_input("Match Date", key="match_date")
+        st.selectbox("Match Level", MATCH_LEVELS, key="match_level")
+        st.text_input("Range Master", key="range_master")
+        st.text_input("Match Director", key="match_director")
+    with c2:
+        st.selectbox("Region (Country)", COUNTRIES, key="country")
+        if ss["country"] == "Philippines":
+            st.selectbox("Province", PH_PROVINCES, key="province")
+        else:
+            st.text_input("Province / State", key="province_text")
+        st.number_input("Number of Stages", min_value=1, max_value=20, step=1, key="num_stages",
+                        help="Creates that many sections in the Stage Set-up tab.")
+
+    st.markdown("### 🎯 Summary of Targets (whole match)")
+    st.caption("Calculated automatically from the Stage Set-up tab and the Roster.")
+    tp = sum(stage_config[n]["paper"] + stage_config[n]["disappearing"] for n in stage_names)
+    td_ = sum(stage_config[n]["disappearing"] for n in stage_names)
+    t1, t2, t3, t4 = st.columns(4)
+    t1.metric("Paper Targets", tp, help=f"Includes {td_} disappearing target(s).")
+    t2.metric("Poppers", sum(stage_config[n]["poppers"] for n in stage_names))
+    t3.metric("Plates", sum(stage_config[n]["plates"] for n in stage_names))
+    t4.metric("Penalty Targets", sum(stage_config[n]["penalty"] for n in stage_names))
+    t5, t6, t7 = st.columns(3)
+    t5.metric("Number of Stages", num_stages)
+    t6.metric("Minimum Rounds", sum(stage_config[n]["min_rounds"] for n in stage_names))
+    t7.metric("Number of Competitors", len(ss.competitors_list))
+    if td_:
+        st.caption(f"Paper Targets include {td_} disappearing target(s).")
+
+    st.markdown("### 🖼️ Logos for Exports")
+    st.caption("Your PPSA (left) and MPRAI (right) logos are built in and appear on every Word/PDF export. "
+               "Upload a file below only if you want to replace one.")
+    lc1, lc2 = st.columns(2)
+    for col, (side, label) in zip((lc1, lc2), (("left", "Left logo"), ("right", "Right logo"))):
+        with col:
+            up = st.file_uploader(f"{label} (PNG/JPG)", type=["png", "jpg", "jpeg"], key=f"logo_up_{side}")
+            if up is not None:
+                sig = (up.name, up.size)
+                if ss.get(f"logo_{side}_sig") != sig:   # apply each new file once
+                    try:
+                        ss[f"logo_{side}"] = process_logo(up.getvalue())
+                        ss[f"logo_{side}_sig"] = sig
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Couldn't read that image: {e}")
+            preview = ss.get(f"logo_{side}") or default_logo(side)
+            if preview:
+                st.image(preview, width=90)
+            if ss.get(f"logo_{side}"):
+                if st.button(f"Remove {label.lower()}", key=f"logo_rm_{side}"):
+                    ss.pop(f"logo_{side}", None)
+                    st.rerun()
+
+logo_left = ss.get("logo_left") or default_logo("left")
+logo_right = ss.get("logo_right") or default_logo("right")
+
+# ------------------------------------------
+# TAB 2: COMPETITOR ROSTER MANAGEMENT
 # ------------------------------------------
 with main_tab_roster:
     st.header("👤 Competitor Roster Management")
-
-    cat_options = ["", "L", "LS", "S", "SS", "GS", "J", "SJ"]
-    cls_options = ["", "GM", "M", "A", "B", "C", "D", "U"]
-
     col_add, col_edit = st.columns(2)
 
     with col_add:
         with st.expander("➕ Add New Competitor", expanded=True):
             with st.form("add_competitor_form", clear_on_submit=True):
                 c_name = st.text_input("Competitor Name", value="")
-                next_default_num = max([int(c["#"]) for c in st.session_state.competitors_list], default=0) + 1
+                next_default_num = max([int(c["#"]) for c in ss.competitors_list], default=0) + 1
                 c_num = st.number_input("Competitor # (stays with the competitor)", min_value=1, step=1, value=next_default_num)
-                c_cat = st.selectbox("Cat", cat_options, key="add_cat")
+                c_div = st.selectbox("Division", DIVISIONS, key="add_div")
+                c_cat = st.selectbox("Cat", CAT_OPTIONS, key="add_cat")
                 c_reg = st.text_input("Reg", value="PHI")
-                c_cls = st.selectbox("Cls", cls_options, key="add_cls")
+                c_cls = st.selectbox("Cls", CLS_OPTIONS, key="add_cls")
                 c_tag = st.text_input("Tag", value="")
                 c_ics = st.text_input("ICS", value="")
-                c_power = st.selectbox("Power", default_power_options, key="add_power")
+                c_power = st.selectbox("Power", ["Minor", "Major"], key="add_power",
+                                       help="Production, Production Optics and PCC are Minor only.")
                 c_dq = st.checkbox("Disqualified (DQ)", value=False, key="add_dq")
 
-                submit_comp = st.form_submit_button("➕ Add Competitor")
-                if submit_comp and not c_name.strip():
-                    st.error("Please enter a competitor name.")
-                if submit_comp and c_name.strip():
+                if st.form_submit_button("➕ Add Competitor"):
                     new_comp_name = c_name.strip()
-                    if any(c["Competitor"].lower() == new_comp_name.lower() for c in st.session_state.competitors_list):
+                    if not new_comp_name:
+                        st.error("Please enter a competitor name.")
+                    elif any(c["Competitor"].lower() == new_comp_name.lower() for c in ss.competitors_list):
                         st.error(f"A competitor named {new_comp_name} already exists.")
+                    elif any(int(c["#"]) == int(c_num) for c in ss.competitors_list):
+                        st.error(f"Competitor # {int(c_num)} is already taken.")
+                    elif not power_ok(c_div, c_power):
+                        st.error(f"{c_div} is restricted to Minor scoring.")
                     else:
-                        if any(int(c["#"]) == int(c_num) for c in st.session_state.competitors_list):
-                            st.error(f"Competitor # {int(c_num)} is already taken.")
-                        else:
-                            st.session_state.competitors_list.append({
-                                "#": int(c_num), "Competitor": new_comp_name, "Cat": c_cat,
-                                "Reg": c_reg, "Cls": c_cls, "Tag": c_tag, "ICS": c_ics, "Power": c_power, "DQ": c_dq
-                            })
-                            st.success(f"Added {new_comp_name} successfully!")
-                            st.rerun()
+                        ss.competitors_list.append({
+                            "#": int(c_num), "Competitor": new_comp_name, "Division": c_div, "Cat": c_cat,
+                            "Reg": c_reg, "Cls": c_cls, "Tag": c_tag, "ICS": c_ics, "Power": c_power, "DQ": c_dq})
+                        st.success(f"Added {new_comp_name} successfully!")
+                        st.rerun()
 
     with col_edit:
         with st.expander("✏️ Edit or Delete Competitor", expanded=False):
-            if st.session_state.competitors_list:
-                comp_names = [c["Competitor"] for c in st.session_state.competitors_list]
+            if ss.competitors_list:
+                comp_names = [c["Competitor"] for c in ss.competitors_list]
                 selected_to_edit = st.selectbox("Select Competitor to Edit/Delete", options=comp_names, key="select_edit_comp")
-
-                current_data = next(c for c in st.session_state.competitors_list if c["Competitor"] == selected_to_edit)
-
+                current_data = next(c for c in ss.competitors_list if c["Competitor"] == selected_to_edit)
+                fv = ss["form_ver"]
                 with st.form("edit_delete_form"):
                     e_name = st.text_input("Competitor Name", value=current_data["Competitor"])
-                    e_num = st.number_input("Competitor #", min_value=1, step=1, value=int(current_data["#"]), key=f"edit_num_{st.session_state.form_ver}_{selected_to_edit}")
-                    e_cat = st.selectbox("Cat", cat_options, index=cat_options.index(current_data["Cat"]) if current_data["Cat"] in cat_options else 0, key=f"edit_cat_{st.session_state.form_ver}_{selected_to_edit}")
+                    e_num = st.number_input("Competitor #", min_value=1, step=1, value=int(current_data["#"]), key=f"edit_num_{fv}_{selected_to_edit}")
+                    cur_div = current_data.get("Division", DIVISIONS[0])
+                    e_div = st.selectbox("Division", DIVISIONS, index=DIVISIONS.index(cur_div) if cur_div in DIVISIONS else 0, key=f"edit_div_{fv}_{selected_to_edit}")
+                    e_cat = st.selectbox("Cat", CAT_OPTIONS, index=CAT_OPTIONS.index(current_data["Cat"]) if current_data["Cat"] in CAT_OPTIONS else 0, key=f"edit_cat_{fv}_{selected_to_edit}")
                     e_reg = st.text_input("Reg", value=current_data["Reg"])
-                    e_cls = st.selectbox("Cls", cls_options, index=cls_options.index(current_data["Cls"]) if current_data["Cls"] in cls_options else 0, key=f"edit_cls_{st.session_state.form_ver}_{selected_to_edit}")
+                    e_cls = st.selectbox("Cls", CLS_OPTIONS, index=CLS_OPTIONS.index(current_data["Cls"]) if current_data["Cls"] in CLS_OPTIONS else 0, key=f"edit_cls_{fv}_{selected_to_edit}")
                     e_tag = st.text_input("Tag", value=current_data["Tag"])
                     e_ics = st.text_input("ICS", value=current_data["ICS"])
-                    e_power = st.selectbox("Power", default_power_options, index=default_power_options.index(current_data["Power"]) if current_data["Power"] in default_power_options else 0, key=f"edit_power_{st.session_state.form_ver}_{selected_to_edit}")
-                    e_dq = st.checkbox("Disqualified (DQ)", value=bool(current_data.get("DQ", False)), key=f"edit_dq_{st.session_state.form_ver}_{selected_to_edit}")
+                    pf_list = ["Minor", "Major"]
+                    e_power = st.selectbox("Power", pf_list, index=pf_list.index(current_data["Power"]) if current_data["Power"] in pf_list else 0, key=f"edit_power_{fv}_{selected_to_edit}")
+                    e_dq = st.checkbox("Disqualified (DQ)", value=bool(current_data.get("DQ", False)), key=f"edit_dq_{fv}_{selected_to_edit}")
 
                     b_col1, b_col2 = st.columns(2)
                     save_changes = b_col1.form_submit_button("💾 Save Changes")
@@ -1774,529 +2152,397 @@ with main_tab_roster:
                         if not new_name:
                             st.error("Name cannot be empty.")
                         elif new_name.lower() != selected_to_edit.lower() and any(
-                            c["Competitor"].lower() == new_name.lower() for c in st.session_state.competitors_list
-                        ):
+                            c["Competitor"].lower() == new_name.lower() for c in ss.competitors_list):
                             st.error(f"Another competitor is already named {new_name}.")
-                        elif any(int(c["#"]) == int(e_num) and c["Competitor"] != selected_to_edit for c in st.session_state.competitors_list):
+                        elif any(int(c["#"]) == int(e_num) and c["Competitor"] != selected_to_edit for c in ss.competitors_list):
                             st.error(f"Competitor # {int(e_num)} is already taken.")
+                        elif not power_ok(e_div, e_power):
+                            st.error(f"{e_div} is restricted to Minor scoring.")
                         else:
                             if new_name != selected_to_edit:
-                                # Carry every saved score over to the new name
-                                st.session_state.scores = {
-                                    (k[0], new_name if k[1] == selected_to_edit else k[1]): v
-                                    for k, v in st.session_state.scores.items()
-                                }
-                                st.session_state["pending_rename"] = (selected_to_edit, new_name)
-                            current_data["Competitor"] = new_name
-                            current_data["#"] = int(e_num)
-                            current_data["Cat"] = e_cat
-                            current_data["Reg"] = e_reg
-                            current_data["Cls"] = e_cls
-                            current_data["Tag"] = e_tag
-                            current_data["ICS"] = e_ics
-                            current_data["Power"] = e_power
-                            current_data["DQ"] = e_dq
+                                ss.scores = {(k[0], new_name if k[1] == selected_to_edit else k[1]): v
+                                             for k, v in ss.scores.items()}
+                                ss["pending_rename"] = (selected_to_edit, new_name)
+                            current_data.update({"Competitor": new_name, "#": int(e_num), "Division": e_div,
+                                                 "Cat": e_cat, "Reg": e_reg, "Cls": e_cls, "Tag": e_tag,
+                                                 "ICS": e_ics, "Power": e_power, "DQ": e_dq})
                             st.success("Competitor updated successfully!")
                             st.rerun()
 
                     if delete_shooter:
-                        st.session_state.competitors_list = [c for c in st.session_state.competitors_list if c["Competitor"] != selected_to_edit]
-                        st.session_state.scores = {k: v for k, v in st.session_state.scores.items() if k[1] != selected_to_edit}
+                        ss.competitors_list = [c for c in ss.competitors_list if c["Competitor"] != selected_to_edit]
+                        ss.scores = {k: v for k, v in ss.scores.items() if k[1] != selected_to_edit}
                         st.warning(f"Deleted {selected_to_edit}!")
                         st.rerun()
             else:
                 st.info("No competitors available to edit.")
 
     st.markdown("### 📋 Official Roster Summary")
-    if st.session_state.competitors_list:
-        df_roster = pd.DataFrame(st.session_state.competitors_list).sort_values("#").reset_index(drop=True)
+    if ss.competitors_list:
+        df_roster = pd.DataFrame(ss.competitors_list)
+        df_roster["Division"] = df_roster.get("Division", DIVISIONS[0])
+        cols = ["#", "Competitor", "Division", "Cat", "Reg", "Cls", "Tag", "ICS", "Power", "DQ"]
+        df_roster = df_roster[cols].sort_values("#").reset_index(drop=True)
         st.dataframe(df_roster, hide_index=True, use_container_width=True)
     else:
         st.warning("No competitors in roster yet. Add one above to begin.")
 
 # ------------------------------------------
-# TAB 2: STAGE SCOREBOARDS & OVERALL STANDINGS
+# TAB 3: STAGE SET-UP
 # ------------------------------------------
-with main_tab_scoring:
-    tabs = stage_names + ["Overall Standings"]
-    tab_objects = st.tabs(tabs)
+with tab_stage_setup:
+    st.header("📋 Stage Set-up")
+    st.caption("Press **Apply Stage** at the bottom of each section to save its changes.")
+    if title_problem:
+        st.error("⚠️ Every stage needs its own non-empty title. Duplicate or blank titles will mix up scores.")
+    for s in range(1, num_stages + 1):
+        title_now = str(ss[f"s_name_{s}"])
+        with st.expander(f"Stage {s}: {title_now}", expanded=(s == 1)):
+            with st.form(f"stage_form_{s}", border=False):
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    st.text_input("Stage Name", key=f"s_name_{s}")
+                    st.text_input("Stage Location", key=f"s_loc_{s}")
+                    st.selectbox("Type of Course", COURSE_TYPES, key=f"s_course_{s}")
+                with col_b:
+                    st.number_input("Paper Targets", min_value=0, step=1, key=f"p_{s}")
+                    st.number_input("Plates", min_value=0, step=1, key=f"pl_{s}")
+                    st.number_input("Poppers", min_value=0, step=1, key=f"po_{s}")
+                    st.number_input("Disappearing Targets", min_value=0, step=1, key=f"dis_{s}",
+                                    help="Counts like a paper target for max points (2 rounds, 5 points each); a miss is not penalized.")
+                    st.number_input("Penalty Targets", min_value=0, step=1, key=f"pen_{s}",
+                                    help="Each Penalty target allows up to 2 NS hits when scoring (0 targets = NS locked).")
+                    st.number_input("Minimum Rounds", min_value=0, step=1, key=f"minr_{s}",
+                                    help="Caps the total A + C + D that can be entered when scoring (0 = use the full target count).")
+                st.form_submit_button(f"✅ Apply Stage {s}")
+            cfg_s = stage_config[title_now] if not title_problem else None
+            if cfg_s:
+                cap_limit = COURSE_CAPS[cfg_s["course"]]
+                st.caption(f"Max Points: **{cfg_s['max_pts']} pts** | Rounds needed for full marks: **{cfg_s['total_rounds']}** | "
+                           f"Minimum Rounds: **{cfg_s['min_rounds']}** | Penalty Targets: **{cfg_s['penalty']}**")
+                if cfg_s["total_rounds"] == 0:
+                    st.warning("This stage has no targets yet.")
+                if cfg_s["min_rounds"] > cap_limit:
+                    st.warning(f"Minimum rounds ({cfg_s['min_rounds']}) exceeds the limit for this course type ({cap_limit}).")
+                if cfg_s["min_rounds"] > cfg_s["total_rounds"]:
+                    st.warning("Minimum rounds is higher than the rounds the targets can absorb; the target count will be used as the cap.")
+            st.checkbox("This is an ICS Classifier stage", key=f"ics_{s}")
+            if ss[f"ics_{s}"]:
+                st.checkbox("Exclude from scoring (leave this stage out of the overall results)", key=f"excl_{s}")
 
-    overall_match_points = {c['Competitor']: Fraction(0) for c in st.session_state.competitors_list}
-    stage_tables = {}      # stage name -> finished stage table (used by the player report)
-
-    for i, s_name in enumerate(stage_names):
-        with tab_objects[i]:
-            st.subheader(f"{s_name} Scoreboard")
+# ------------------------------------------
+# TAB 4: MATCH SCORING
+# ------------------------------------------
+with tab_scoring:
+    st.header("🎯 Match Scoring")
+    if title_problem:
+        st.error("Fix the stage titles in the Stage Set-up tab first (they must be unique and not blank).")
+    elif not active_competitors:
+        st.warning("No active (non-DQ) competitors available. Add competitors in the Roster tab.")
+    else:
+        fv = ss["form_ver"]
+        for s_name in stage_names:
             cfg = stage_config[s_name]
-            total_rounds = cfg['total_rounds']
-            st.info(f"Targets: **{cfg['paper']} Paper** ({cfg['paper']*2} shots) | **{cfg['steel']} Steel** ({cfg['steel']} shots) | Total Required Rounds: **{total_rounds}** | Max Points: **{cfg['max_pts']}**")
+            si = cfg["idx"]
+            with st.expander(f"{s_name}" + ("  (ICS classifier - excluded from overall)" if cfg["exclude"]
+                                           else "  (ICS classifier)" if cfg["ics"] else ""), expanded=False):
+                st.info(f"Targets: **{cfg['paper']} Paper** | **{cfg['disappearing']} Disappearing** | **{cfg['plates']} Plates** | "
+                        f"**{cfg['poppers']} Poppers** | **{cfg['penalty']} Penalty** | Rounds for full marks: **{cfg['total_rounds']}** | "
+                        f"Minimum Rounds: **{cfg['min_rounds']}** | Max Points: **{cfg['max_pts']}**")
+                selected_shooter = st.selectbox("Select Competitor to Enter Score",
+                                                options=[c["Competitor"] for c in active_competitors], key=f"select_{si}")
+                shooter_info = next(c for c in active_competitors if c["Competitor"] == selected_shooter)
+                pf = shooter_info["Power"]
 
-            active_competitors = [c for c in st.session_state.competitors_list if not c['DQ']]
+                d1, d2, d3, d4, d5 = st.columns(5)
+                d1.markdown(f"**#:** {shooter_info['#']}")
+                d1.markdown(f"**Name:** {shooter_info['Competitor']}")
+                d2.markdown(f"**Division:** {shooter_info.get('Division', '-')}")
+                d2.markdown(f"**Power Factor:** {pf}")
+                d3.markdown(f"**Category:** {shooter_info['Cat'] or '-'}")
+                d3.markdown(f"**Class:** {shooter_info['Cls'] or '-'}")
+                d4.markdown(f"**Region:** {shooter_info['Reg'] or '-'}")
+                d4.markdown(f"**Tag:** {shooter_info['Tag'] or '-'}")
+                d5.markdown(f"**ICS:** {shooter_info['ICS'] or '-'}")
+                d5.markdown(f"**DQ:** {'Yes' if shooter_info.get('DQ') else 'No'}")
 
-            if not active_competitors:
-                st.warning("No active (non-DQ) competitors available.")
-                continue
+                key = (s_name, selected_shooter)
+                existing = ss.scores.get(key, {})
+                score_cap = cfg["score_cap"]
+                max_ns = cfg["penalty"] * 2
+                total_rounds = cfg["total_rounds"]
 
-            fv = st.session_state["form_ver"]
-            selected_shooter = st.selectbox("Select Competitor to Enter Score", options=[c['Competitor'] for c in active_competitors], key=f"select_{s_name}")
-            shooter_info = next(c for c in active_competitors if c['Competitor'] == selected_shooter)
-            pf = shooter_info['Power']
+                with st.form(f"score_form_{si}_{selected_shooter}"):
+                    st.markdown(f"**Scoring for: {selected_shooter} ({pf})**")
+                    col_t, col_s, col_p, col_tot = st.columns(4)
 
-            existing_score = st.session_state.scores.get((s_name, selected_shooter), {})
+                    with col_t:
+                        st.markdown("##### Time")
+                        raw_time = st.number_input("Time (s)", min_value=0.0, value=float(existing.get("time", 0.0)),
+                                                   format="%.2f", key=f"sf{fv}_time_{si}_{selected_shooter}")
+                        c_status = st.selectbox("Stage Status", ["Scored", "Did Not Finish (DNF)"],
+                                                index=1 if existing.get("DNF", False) else 0,
+                                                key=f"sf{fv}_status_{si}_{selected_shooter}")
 
-            with st.form(f"score_form_{s_name}_{selected_shooter}"):
-                st.markdown(f"**Scoring for: {selected_shooter} ({pf})**")
+                    with col_s:
+                        st.markdown("##### Scoring")
+                        a0 = existing.get("A", 0) + existing.get("steel", 0)
+                        alpha = st.number_input("Alpha (A)", min_value=0, max_value=score_cap, value=min(int(a0), score_cap),
+                                                disabled=(score_cap == 0), key=f"sf{fv}_a_{si}_{selected_shooter}")
+                        charlie = st.number_input("Charlie (C)", min_value=0, max_value=score_cap, value=min(int(existing.get("C", 0)), score_cap),
+                                                  disabled=(score_cap == 0), key=f"sf{fv}_c_{si}_{selected_shooter}")
+                        delta = st.number_input("Delta (D)", min_value=0, max_value=score_cap, value=min(int(existing.get("D", 0)), score_cap),
+                                                disabled=(score_cap == 0), key=f"sf{fv}_d_{si}_{selected_shooter}")
+                        st.caption(f"A + C + D can't exceed **{score_cap}**.")
 
-                f_col1, f_col2 = st.columns(2)
-                c_status = f_col1.selectbox("Stage Status", options=["Scored", "Did Not Finish (DNF)"], index=1 if existing_score.get("DNF", False) else 0, key=f"sf{fv}_status_{s_name}_{selected_shooter}")
-                raw_time = f_col2.number_input("Time (s)", min_value=0.0, value=float(existing_score.get("time", 0.0)), format="%.2f", key=f"sf{fv}_time_{s_name}_{selected_shooter}")
+                    with col_p:
+                        st.markdown("##### Penalties")
+                        mike = st.number_input("Mike (M)", min_value=0, max_value=total_rounds, value=min(int(existing.get("M", 0)), total_rounds),
+                                               disabled=(total_rounds == 0), key=f"sf{fv}_m_{si}_{selected_shooter}")
+                        no_shoot = st.number_input("No-Shoot (NS)", min_value=0, max_value=max_ns, value=min(int(existing.get("NS", 0)), max_ns),
+                                                   disabled=(max_ns == 0),
+                                                   help=f"Up to {max_ns} (2 per Penalty target)." if max_ns else "This stage has no Penalty targets (set in Stage Set-up).",
+                                                   key=f"sf{fv}_ns_{si}_{selected_shooter}")
+                        proc = st.number_input("Procedural (Proc)", min_value=0, value=int(existing.get("Proc", 0) + existing.get("FTE", 0)),
+                                               key=f"sf{fv}_proc_{si}_{selected_shooter}")
 
-                # --- Section 1: Scoring ---
-                st.markdown("##### 🎯 Scoring")
-                sc1, sc2, sc3, sc4 = st.columns(4)
+                    with col_tot:
+                        st.markdown("##### Totals")
+                        totals_box = st.container()
 
-                max_steel = max(0, cfg['steel'])
-                max_paper_shots = cfg['paper'] * 2
+                    hits_acd = alpha + charlie + delta
+                    accounted = hits_acd + mike
+                    if hits_acd > score_cap:
+                        st.error(f"❌ A + C + D ({hits_acd}) exceed the allowed {score_cap}!")
+                    elif total_rounds > 0 and accounted > total_rounds:
+                        st.error(f"❌ Hits and mikes ({accounted}) exceed the stage's {total_rounds} rounds!")
+                    elif total_rounds > 0:
+                        st.caption(f"Accounted rounds: **{accounted}** / {total_rounds}")
 
-                plates = sc1.number_input(
-                    "Steel Hits",
-                    min_value=0,
-                    max_value=max_steel,
-                    value=min(int(existing_score.get("steel", 0)), max_steel),
-                    disabled=(max_steel == 0),
-                    key=f"sf{fv}_st_{s_name}_{selected_shooter}"
-                )
-
-                alpha = sc2.number_input(
-                    "Alpha (A)",
-                    min_value=0,
-                    max_value=max_paper_shots,
-                    value=min(int(existing_score.get("A", 0)), max_paper_shots),
-                    disabled=(max_paper_shots == 0),
-                    key=f"sf{fv}_a_{s_name}_{selected_shooter}"
-                )
-
-                charlie = sc3.number_input(
-                    "Charlie (C)",
-                    min_value=0,
-                    max_value=max_paper_shots,
-                    value=min(int(existing_score.get("C", 0)), max_paper_shots),
-                    disabled=(max_paper_shots == 0),
-                    key=f"sf{fv}_c_{s_name}_{selected_shooter}"
-                )
-
-                delta = sc4.number_input(
-                    "Delta (D)",
-                    min_value=0,
-                    max_value=max_paper_shots,
-                    value=min(int(existing_score.get("D", 0)), max_paper_shots),
-                    disabled=(max_paper_shots == 0),
-                    key=f"sf{fv}_d_{s_name}_{selected_shooter}"
-                )
-
-                # --- Section 2: Penalties ---
-                st.markdown("##### ⚠️ Penalties")
-                p1, p2, p3, p4 = st.columns(4)
-
-                mike = p1.number_input(
-                    "Mike (M)",
-                    min_value=0,
-                    max_value=total_rounds,
-                    value=min(int(existing_score.get("M", 0)), total_rounds),
-                    disabled=(total_rounds == 0),
-                    key=f"sf{fv}_m_{s_name}_{selected_shooter}"
-                )
-
-                no_shoot = p2.number_input("No-Shoot (NS)", min_value=0, value=int(existing_score.get("NS", 0)), key=f"sf{fv}_ns_{s_name}_{selected_shooter}")
-                fte = p3.number_input("Failure to Engage (FTE)", min_value=0, value=int(existing_score.get("FTE", 0)), key=f"sf{fv}_fte_{s_name}_{selected_shooter}")
-                proc = p4.number_input("Procedural (Proc)", min_value=0, value=int(existing_score.get("Proc", 0)), key=f"sf{fv}_proc_{s_name}_{selected_shooter}")
-
-                # Validation Status Indicators & Checks
-                total_paper_hits = alpha + charlie + delta
-                total_accounted_rounds = plates + total_paper_hits + mike
-
-                if total_rounds > 0:
-                    if total_paper_hits > max_paper_shots:
-                        st.error(f"❌ Paper hits ({total_paper_hits}) exceed total required paper shots ({max_paper_shots})!")
-                    elif total_accounted_rounds > total_rounds:
-                        st.error(f"❌ Total accounted hits & mikes ({total_accounted_rounds}) exceed total stage rounds ({total_rounds})!")
-                    elif total_accounted_rounds == total_rounds:
-                        st.caption(f"✅ All {total_rounds} stage rounds accounted for!")
-                    else:
-                        st.caption(f"⚠️ Accounted rounds: **{total_accounted_rounds}** / {total_rounds} ({total_rounds - total_accounted_rounds} remaining)")
-
-                save_score = st.form_submit_button("💾 Save Score")
-                if save_score:
-                    if total_paper_hits > max_paper_shots:
-                        st.error(f"Cannot save: Paper hits ({total_paper_hits}) exceed required paper shots ({max_paper_shots}).")
-                    elif total_accounted_rounds > total_rounds:
-                        st.error(f"Cannot save: Total hits and mikes ({total_accounted_rounds}) exceed total stage rounds ({total_rounds}).")
-                    else:
-                        is_dnf = (c_status == "Did Not Finish (DNF)")
-                        key = (s_name, selected_shooter)
-                        st.session_state.scores[key] = {
-                            "time": raw_time, "steel": plates, "A": alpha, "C": charlie,
-                            "D": delta, "M": mike, "NS": no_shoot, "FTE": fte, "Proc": proc, "DNF": is_dnf, "PF": pf
-                        }
-                        st.success(f"Score saved for {selected_shooter}!")
-                        if raw_time <= 0 and not is_dnf:
-                            st.warning(
-                                f"⚠️ Time is 0.00 for {selected_shooter}. A scored run with no time earns "
-                                f"**0 points** (hit factor can't be calculated). Enter the time, or set the "
-                                f"status to DNF if they did not finish."
-                            )
-
-            zero_time_names = []
-            stage_records = []
-            for c in active_competitors:
-                c_name = c['Competitor']
-                s_data = st.session_state.scores.get((s_name, c_name), None)
-
-                if s_data and s_data.get('DNF', False):
-                    raw_pts = 0
-                    hf = Fraction(0)
-                    time_val = s_data.get('time', 0.0)
-                elif s_data and s_data['time'] > 0:
-                    c_pts = 4 if c['Power'] == "Major" else 3
-                    d_pts = 2 if c['Power'] == "Major" else 1
-
-                    raw_pts = (s_data['steel'] * 5) + (s_data['A'] * 5) + (s_data['C'] * c_pts) + (s_data['D'] * d_pts) - (s_data['M'] * 10) - (s_data['NS'] * 10) - (s_data['FTE'] * 10) - (s_data.get('Proc', 0) * 10)
-                    raw_pts = max(0, raw_pts)
-                    hf = Fraction(raw_pts) / Fraction(str(s_data['time']))  # exact; display rounds later
-                    time_val = s_data['time']
-                else:
-                    raw_pts = 0
-                    hf = Fraction(0)
-                    time_val = 0.0
-                    if s_data:  # a score was saved, but not DNF and time is 0
-                        zero_time_names.append(c_name)
-
-                stage_records.append({
-                    "Rank": 0,
-                    "Stage %": 0.0,
-                    "Stage Points": 0.0,
-                    "#": c['#'],
-                    "Competitor": c_name,
-                    "Cat": c['Cat'], "Reg": c['Reg'], "Cls": c['Cls'], "Tag": c['Tag'], "ICS": c['ICS'],
-                    "Raw Points": raw_pts,
-                    "Raw Time": time_val,
-                    "HF_exact": hf,
-                    "Hit Factor": float(hf),
-                    "Power": c['Power'],
-                    "Steel": s_data['steel'] if s_data else 0,
-                    "A": s_data['A'] if s_data else 0,
-                    "C": s_data['C'] if s_data else 0,
-                    "D": s_data['D'] if s_data else 0,
-                    "M": s_data['M'] if s_data else 0,
-                    "NS": s_data['NS'] if s_data else 0,
-                    "FTE": s_data['FTE'] if s_data else 0,
-                    "Proc": s_data.get('Proc', 0) if s_data else 0,
-                })
-
-            if zero_time_names:
-                st.warning(
-                    f"⚠️ **Time is 0.00 (not marked DNF) for:** {', '.join(zero_time_names)}. "
-                    f"These competitors are currently receiving **0 points** on this stage. "
-                    f"Enter their time or mark them DNF."
-                )
-
-            df_stage = pd.DataFrame(stage_records)
-            hf_exact = df_stage["HF_exact"].tolist()
-            max_hf = max(hf_exact) if hf_exact else Fraction(0)
-            max_pts_int = int(cfg['max_pts'])
-
-            # Everything is computed from exact fractions, so only truly identical results tie.
-            # The 4-decimal figures shown on screen / in exports are display formatting only.
-            if max_hf > 0:
-                ratio_exact = [h / max_hf for h in hf_exact]
-            else:
-                ratio_exact = [Fraction(0) for _ in hf_exact]
-            pts_exact = [r * max_pts_int for r in ratio_exact]
-
-            df_stage["Pts_exact"] = pts_exact
-            df_stage["Stage Points"] = [float(p) for p in pts_exact]
-            df_stage["Stage %"] = [float(r * 100) for r in ratio_exact]
-
-            # Ties share the same rank (1, 1, 3, ...)
-            order = sorted(range(len(hf_exact)), key=lambda i: -hf_exact[i])
-            df_stage = df_stage.iloc[order].reset_index(drop=True)
-            df_stage["Rank"] = rank_min(df_stage["HF_exact"].tolist())
-            stage_tables[s_name] = df_stage.copy()
-
-            # Stage Display Table (UI view)
-            df_stage_view = df_stage[["Rank", "Stage %", "Stage Points", "#", "Competitor", "Cat", "Reg", "Cls", "Tag", "ICS", "Raw Points", "Raw Time", "Hit Factor", "Power"]]
-
-            show_centered_table(df_stage_view, {
-                "Stage %": "{:.2f}%",
-                "Stage Points": "{:.4f}",
-                "Raw Points": "{:.4f}",
-                "Raw Time": "{:.2f}",
-                "Hit Factor": "{:.4f}"
-            })
-
-            # Dedicated Word Export view
-            df_stage_word = df_stage[["Rank", "Stage %", "Stage Points", "#", "Competitor", "Cat", "Reg", "Cls", "Tag", "ICS", "Power"]].copy()
-            df_stage_word["Stage %"] = df_stage_word["Stage %"].round(2).astype(str) + "%"
-            df_stage_word["Stage Points"] = df_stage_word["Stage Points"].round(4)
-
-            # Streamlined Export Section
-            st.markdown("#### 📥 Export Stage Results")
-            col_ex1, col_ex2 = st.columns(2)
-
-            pdf_export_button(
-                col_ex1, "📥 Download PDF (.pdf)", f"{match_name}_{division}_{s_name}_Results.pdf",
-                [(match_name, 16, True), (f"{division} ({s_name})", 12, False), (f"Date: {match_date.strftime('%B %d, %Y')}", 10, False)],
-                df_stage_word, key=f"dl_pdf_{s_name}",
-            )
-
-            word_export_button(
-                col_ex2, "📥 Download Word (.docx)", f"{match_name}_{division}_{s_name}_Results.docx",
-                [(match_name, 16, True), (f"{division} ({s_name})", 12, False), (f"Date: {match_date.strftime('%B %d, %Y')}", 10, False)],
-                df_stage_word, key=f"dl_word_{s_name}",
-            )
-
-            # --- Inline Hit Breakdown Inspection (with its exports inside) ---
-            # Full-roster hit breakdown for this stage (A includes steel hits, like the cumulative export)
-            df_stage_hits = pd.DataFrame({
-                "Rank": df_stage["Rank"],
-                "Stage %": df_stage["Stage %"].round(2).astype(str) + "%",
-                "Stage Points": df_stage["Stage Points"].round(4),
-                "#": df_stage["#"],
-                "Competitor": df_stage["Competitor"],
-                "A": df_stage["A"] + df_stage["Steel"],
-                "C": df_stage["C"], "D": df_stage["D"], "M": df_stage["M"],
-                "NS": df_stage["NS"], "FTE": df_stage["FTE"], "P": df_stage["Proc"],
-                "Time": df_stage["Raw Time"].map(lambda t: f"{t:.2f}"),
-            })
-
-            with st.expander(f"🔍 View Hit Breakdown ({s_name})"):
-                if not df_stage.empty:
-                    inspect_shooter = st.selectbox("Select Competitor to Inspect Hits", options=df_stage["Competitor"].tolist(), key=f"inspect_{s_name}")
-                    row_data = df_stage[df_stage["Competitor"] == inspect_shooter].iloc[0]
-
-                    hb_col1, hb_col2, hb_col3, hb_col4, hb_col5, hb_col6, hb_col7, hb_col8 = st.columns(8)
-                    hb_col1.metric("Steels", int(row_data["Steel"]))
-                    hb_col2.metric("Alpha (A)", int(row_data["A"]))
-                    hb_col3.metric("Charlie (C)", int(row_data["C"]))
-                    hb_col4.metric("Delta (D)", int(row_data["D"]))
-                    hb_col5.metric("Mike (M)", int(row_data["M"]))
-                    hb_col6.metric("No-Shoot", int(row_data["NS"]))
-                    hb_col7.metric("FTE", int(row_data["FTE"]))
-                    hb_col8.metric("Procedural", int(row_data["Proc"]))
-
-                st.markdown("#### 📥 Export Hit Breakdown")
-                col_hb1, col_hb2 = st.columns(2)
-                hb_lines = [(match_name, 16, True), (f"{division} ({s_name}) - Hit Breakdown", 12, False),
-                            (f"Date: {match_date.strftime('%B %d, %Y')}", 10, False)]
-                pdf_export_button(
-                    col_hb1, "📥 Download Hit Breakdown PDF (.pdf)",
-                    f"{match_name}_{division}_{s_name}_Hit_Breakdown.pdf",
-                    hb_lines, df_stage_hits, key=f"dl_pdf_hits_{s_name}",
-                )
-                word_export_button(
-                    col_hb2, "📥 Download Hit Breakdown Word (.docx)",
-                    f"{match_name}_{division}_{s_name}_Hit_Breakdown.docx",
-                    hb_lines, df_stage_hits, key=f"dl_word_hits_{s_name}",
-                )
-
-            for _, row in df_stage.iterrows():
-                overall_match_points[row["Competitor"]] += row["Pts_exact"]
-
-    # --- OVERALL STANDINGS SUB-TAB ---
-    with tab_objects[-1]:
-        st.subheader("🏆 Overall Match Standings")
-        active_competitors_list = [c for c in st.session_state.competitors_list if not c['DQ']]
-
-        if active_competitors_list:
-            df_overall = pd.DataFrame(active_competitors_list)
-            # Exact sums of exact stage points: only genuinely identical totals tie
-            pts_exact_list = [overall_match_points[c] for c in df_overall["Competitor"]]
-            max_overall = max(pts_exact_list)
-            df_overall["Pts_exact"] = pts_exact_list
-            df_overall["Points"] = [float(p) for p in pts_exact_list]
-            df_overall["%"] = [float(p / max_overall * 100) if max_overall > 0 else 0.0 for p in pts_exact_list]
-
-            order_o = sorted(range(len(pts_exact_list)), key=lambda i: -pts_exact_list[i])
-            df_overall = df_overall.iloc[order_o].reset_index(drop=True)
-            df_overall["Rank"] = rank_min(df_overall["Pts_exact"].tolist())
-
-            df_overall_display = df_overall[["Rank", "%", "Points", "#", "Competitor", "Cat", "Reg", "Cls", "Tag", "ICS", "Power"]]
-
-            show_centered_table(df_overall_display, {
-                "Points": "{:.4f}",
-                "%": "{:.2f}%"
-            })
-
-            df_overall_print = df_overall[["Rank", "%", "Points", "#", "Competitor", "Cat", "Reg", "Cls", "Tag", "ICS", "Power"]].copy()
-            df_overall_print["%"] = df_overall_print["%"].round(2).astype(str) + "%"
-            df_overall_print["Points"] = df_overall_print["Points"].round(4)
-
-            st.markdown("#### 📥 Export Overall Standings")
-            col_o1, col_o2 = st.columns(2)
-
-            pdf_export_button(
-                col_o1, "📥 Download PDF (.pdf)", f"{match_name}_{division}_Overall_Standings.pdf",
-                [(match_name, 16, True), (f"{division} (Overall Standings)", 12, False), (f"Date: {match_date.strftime('%B %d, %Y')}", 10, False)],
-                df_overall_print, key="dl_pdf_overall",
-            )
-
-            word_export_button(
-                col_o2, "📥 Download Word (.docx)", f"{match_name}_{division}_Overall_Standings.docx",
-                [(match_name, 16, True), (f"{division} (Overall Standings)", 12, False), (f"Date: {match_date.strftime('%B %d, %Y')}", 10, False)],
-                df_overall_print, key="dl_word_overall",
-            )
-
-            # ==========================================
-            # INTEGRATED COMPETITOR SUMMARY INSPECTOR & ROSTER EXPORT
-            # ==========================================
-            st.divider()
-
-            # Calculate full cumulative dataset for the entire active roster
-            roster_cum_records = []
-            for _, c_row in df_overall.iterrows():
-                c_name = c_row['Competitor']
-                tot_steel, tot_A, tot_C, tot_D = 0, 0, 0, 0
-                tot_M, tot_NS, tot_FTE, tot_Proc = 0, 0, 0, 0
-                tot_time = 0.0
-
-                for s_name in stage_names:
-                    s_data = st.session_state.scores.get((s_name, c_name), {})
-                    if s_data:
-                        tot_steel += s_data.get('steel', 0)
-                        tot_A += s_data.get('A', 0)
-                        tot_C += s_data.get('C', 0)
-                        tot_D += s_data.get('D', 0)
-                        tot_M += s_data.get('M', 0)
-                        tot_NS += s_data.get('NS', 0)
-                        tot_FTE += s_data.get('FTE', 0)
-                        tot_Proc += s_data.get('Proc', 0)
-                        tot_time += s_data.get('time', 0.0)
-
-                roster_cum_records.append({
-                    "Rank": c_row["Rank"],
-                    "%": f"{c_row['%']:.2f}%",
-                    "Points": f"{c_row['Points']:.4f}",
-                    "#": c_row["#"],
-                    "Competitor": c_name,
-                    "Cat": c_row["Cat"],
-                    "Reg": c_row["Reg"],
-                    "Cls": c_row["Cls"],
-                    "Tag": c_row["Tag"],
-                    "ICS": c_row["ICS"],
-                    "Power": c_row["Power"],
-                    "A": tot_A + tot_steel,
-                    "C": tot_C,
-                    "D": tot_D,
-                    "M": tot_M,
-                    "NS": tot_NS,
-                    "FTE": tot_FTE,
-                    "P": tot_Proc,
-                    "Total Time": f"{tot_time:.2f}"
-                })
-
-            df_roster_cum = pd.DataFrame(roster_cum_records)
-
-            # Filtered Export View (Only requested columns)
-            export_columns = ["Rank", "%", "Points", "#", "Competitor", "A", "C", "D", "M", "NS", "FTE", "P", "Total Time"]
-            df_roster_cum_export = df_roster_cum[export_columns].copy()
-
-            with st.expander("🔍 View Cumulative Hit Breakdown"):
-                ranked_competitors = df_overall["Competitor"].tolist()
-                selected_comp_inspect = st.selectbox(
-                    "Select Competitor to inspect individual performance metrics:",
-                    options=ranked_competitors,
-                    key="select_cum_inspect"
-                )
-                if selected_comp_inspect:
-                    comp_info = df_overall[df_overall["Competitor"] == selected_comp_inspect].iloc[0]
-                    comp_cum = df_roster_cum[df_roster_cum["Competitor"] == selected_comp_inspect].iloc[0]
-
-                    # Display Metrics Cards for Selected Competitor
-                    m_col1, m_col2, m_col3, m_col4, m_col5, m_col6, m_col7, m_col8 = st.columns(8)
-                    m_col1.metric("Rank", f"#{comp_info['Rank']}")
-                    m_col2.metric("Total Points", f"{comp_info['Points']:.2f}")
-                    m_col3.metric("Alpha (A)", comp_cum["A"], help="Includes Paper Alpha + Steel Hits")
-                    m_col4.metric("Charlie (C)", comp_cum["C"])
-                    m_col5.metric("Delta (D)", comp_cum["D"])
-                    m_col6.metric("Mikes (M)", comp_cum["M"])
-                    m_col7.metric("Penalties", comp_cum["NS"] + comp_cum["FTE"] + comp_cum["P"], help="NS + FTE + P")
-                    m_col8.metric("Total Time", f"{comp_cum['Total Time']}s")
-
-                # Full Roster Cumulative Breakdown Export Section
-                st.markdown("#### 📥 Export Full Roster Cumulative Breakdown")
-                sc_col1, sc_col2 = st.columns(2)
-
-                pdf_export_button(
-                    sc_col1, "📥 Download Full Roster Cumulative PDF (.pdf)",
-                    f"{match_name}_{division}_Full_Roster_Cumulative_Summary.pdf",
-                    [(match_name, 16, True), ("Full Roster Cumulative Hit & Time Summary", 12, False),
-                     (f"Division: {division} | Date: {match_date.strftime('%B %d, %Y')}", 10, False)],
-                    df_roster_cum_export, key="dl_roster_cum_pdf",
-                )
-
-                word_export_button(
-                    sc_col2, "📥 Download Full Roster Cumulative Word (.docx)",
-                    f"{match_name}_{division}_Full_Roster_Cumulative_Summary.docx",
-                    [(match_name, 16, True), ("Full Roster Cumulative Hit & Time Summary", 12, False),
-                     (f"Division: {division} | Date: {match_date.strftime('%B %d, %Y')}", 10, False)],
-                    df_roster_cum_export, key="dl_roster_cum_word",
-                )
-
-            with st.expander("👤 View Individual Player Report"):
-                report_name = st.selectbox(
-                    "Select Competitor for the player report:",
-                    options=df_overall["Competitor"].tolist(),
-                    key="select_player_report",
-                )
-                if report_name:
-                    rep = build_player_report(report_name, df_overall, stage_tables, stage_names, st.session_state.scores)
-                    tot = rep["totals"]
-
-                    k1, k2, k3, k4, k5, k6 = st.columns(6)
-                    k1.metric("Rank", f"#{rep['rank']} of {rep['n_players']}" + (" (tied)" if rep["tied"] else ""))
-                    k2.metric("Total Points", f"{rep['points']:.2f}")
-                    k3.metric("% of 1st", f"{rep['percent']:.2f}%")
-                    k4.metric("Behind 1st", f"{rep['behind']:.2f}")
-                    k5.metric("Total Time", f"{rep['total_time']:.2f}s")
-                    k6.metric("Penalties", tot["M"] + tot["NS"] + tot["FTE"] + tot["P"], help="M + NS + FTE + P")
-
-                    h1, h2, h3, h4, h5, h6, h7 = st.columns(7)
-                    h1.metric("Alpha (A)", tot["A"], help="Includes steel hits")
-                    h2.metric("Charlie (C)", tot["C"])
-                    h3.metric("Delta (D)", tot["D"])
-                    h4.metric("Mike (M)", tot["M"])
-                    h5.metric("No-Shoot (NS)", tot["NS"])
-                    h6.metric("FTE", tot["FTE"])
-                    h7.metric("Procedural (P)", tot["P"])
-
-                    chart_col, stats_col = st.columns([3, 2])
-                    with chart_col:
-                        if rep["png"]:
-                            st.image(rep["png"], caption="Hits only: A, C, D, M, NS, FTE")
+                    save_score = st.form_submit_button("💾 Save Score")
+                    if save_score:
+                        if hits_acd > score_cap:
+                            st.error(f"Cannot save: A + C + D ({hits_acd}) exceed the allowed {score_cap}.")
+                        elif accounted > total_rounds:
+                            st.error(f"Cannot save: hits and mikes ({accounted}) exceed total stage rounds ({total_rounds}).")
                         else:
-                            st.warning("The pie chart needs the matplotlib package. In Terminal run: "
-                                       "python3 -m pip install matplotlib   then restart the app.")
-                    with stats_col:
-                        st.dataframe(pd.DataFrame(rep["highlights"], columns=["Highlight", "Value"]),
-                                     hide_index=True, use_container_width=True)
+                            is_dnf = (c_status == "Did Not Finish (DNF)")
+                            ss.scores[key] = {"time": raw_time, "A": alpha, "C": charlie, "D": delta,
+                                              "M": mike, "NS": no_shoot, "Proc": proc, "DNF": is_dnf, "PF": pf}
+                            st.success(f"Score saved for {selected_shooter}!")
+                            if raw_time <= 0 and not is_dnf:
+                                st.warning(f"⚠️ Time is 0.00 for {selected_shooter}. A scored run with no time earns **0 points** "
+                                           f"(hit factor can't be calculated). Enter the time, or set the status to DNF.")
 
-                    st.markdown("##### Stage-by-Stage Breakdown")
-                    st.dataframe(pd.DataFrame(rep["stage_rows"], columns=rep["stage_header"]),
+                    saved = ss.scores.get(key)
+                    with totals_box:
+                        if saved:
+                            raw_p, ded_p, net_p = calc_points(pf, saved)
+                            if saved.get("DNF") or saved.get("time", 0) <= 0:
+                                hf_v = 0.0
+                            else:
+                                hf_v = float(Fraction(net_p) / Fraction(str(saved["time"])))
+                            st.metric("Raw Points (before deductions)", f"{raw_p}")
+                            st.metric("Deductions", f"-{ded_p}")
+                            st.metric("Stage Points (after deductions)", f"{net_p}")
+                            st.metric("Hit Factor", f"{hf_v:.4f}")
+                        else:
+                            st.caption("Nothing saved yet.")
+                        st.caption("Totals show the saved score and refresh after you press Save.")
+
+        # warn about saved runs with zero time
+        zero_names = sorted({k[1] for k, v in ss.scores.items() if k[0] in stage_config and not v.get("DNF", False) and v.get("time", 0) <= 0})
+        if zero_names:
+            st.warning(f"⚠️ **Time is 0.00 (not marked DNF) for:** {', '.join(zero_names)} (on at least one stage). "
+                       f"They receive **0 points** on those stages until a time is entered or DNF is set.")
+
+# ------------------------------------------
+# TAB 5: STAGE RESULTS
+# ------------------------------------------
+STAGE_VIEW_COLS = ["Rank", "Stage %", "Stage Points", "#", "Competitor", "Division", "Cat", "Reg", "Cls", "Tag", "ICS",
+                   "Raw Points", "Deductions", "Net Points", "Raw Time", "Hit Factor", "Power"]
+STAGE_FMT = {"Stage %": "{:.2f}%", "Stage Points": "{:.4f}", "Raw Time": "{:.2f}", "Hit Factor": "{:.4f}"}
+EXPORT_COLS = ["Rank", "Stage %", "Stage Points", "#", "Competitor", "Cat", "Reg", "Cls", "Tag", "ICS", "Power"]
+
+
+def stage_export_df(df, with_division):
+    out = df[EXPORT_COLS].copy()
+    out["Stage %"] = out["Stage %"].round(2).astype(str) + "%"
+    out["Stage Points"] = out["Stage Points"].round(4)
+    if with_division:
+        out["Division"] = df["Division"]
+    return out
+
+
+def export_row(container_cols, title_line, file_stub, df_export, key):
+    lines = [(match_name, 16, True), (title_line, 12, False), (date_line(), 10, False)]
+    pdf_export_button(container_cols[0], "📥 Download PDF (.pdf)", file_stub + ".pdf", lines, df_export, key=f"pdf_{key}")
+    word_export_button(container_cols[1], "📥 Download Word (.docx)", file_stub + ".docx", lines, df_export, key=f"word_{key}")
+
+
+with tab_stage_results:
+    st.header("📊 Stage Results")
+    if title_problem:
+        st.error("Fix the stage titles in the Stage Set-up tab first.")
+    elif not active_competitors:
+        st.warning("No active (non-DQ) competitors available.")
+    else:
+        with st.expander("Stage Results (per division)", expanded=False):
+            st.caption("Stage % and points compare each competitor with the best hit factor in the same division.")
+            stabs = st.tabs(stage_names)
+            for s_name, stab in zip(stage_names, stabs):
+                si = stage_config[s_name]["idx"]
+                with stab:
+                    if stage_config[s_name]["exclude"]:
+                        st.info("ICS classifier stage: shown here, but left out of the overall results.")
+                    df = stage_div[s_name]
+                    for div in divisions_present:
+                        sub = df[df["Division"] == div].reset_index(drop=True)
+                        st.markdown(f"#### {div}")
+                        show_centered_table(sub[STAGE_VIEW_COLS], STAGE_FMT)
+                        export_row(st.columns(2), f"{div} ({s_name})",
+                                   safe(f"{match_name}_{div}_{s_name}_Results"), stage_export_df(sub, False), f"stg_div_{si}_{div}")
+        with st.expander("Stage Results (all divisions)", expanded=False):
+            st.caption("Stage % and points compare each competitor with the best hit factor across ALL divisions.")
+            stabs = st.tabs(stage_names)
+            for s_name, stab in zip(stage_names, stabs):
+                si = stage_config[s_name]["idx"]
+                with stab:
+                    if stage_config[s_name]["exclude"]:
+                        st.info("ICS classifier stage: shown here, but left out of the overall results.")
+                    df = stage_all[s_name]
+                    show_centered_table(df[STAGE_VIEW_COLS], STAGE_FMT)
+                    export_row(st.columns(2), f"All Divisions ({s_name})",
+                               safe(f"{match_name}_All_Divisions_{s_name}_Results"), stage_export_df(df, True), f"stg_all_{si}")
+
+# ------------------------------------------
+# TAB 6: OVERALL RESULTS
+# ------------------------------------------
+OVERALL_COLS = ["Rank", "%", "Points", "#", "Competitor", "Division", "Cat", "Reg", "Cls", "Tag", "ICS", "Power"]
+
+
+def overall_export_df(df, with_division):
+    cols = ["Rank", "%", "Points", "#", "Competitor", "Cat", "Reg", "Cls", "Tag", "ICS", "Power"]
+    out = df[cols].copy()
+    out["%"] = out["%"].round(2).astype(str) + "%"
+    out["Points"] = out["Points"].round(4)
+    if with_division:
+        out["Division"] = df["Division"]
+    return out
+
+
+with tab_overall:
+    st.header("🏆 Overall Results")
+    if title_problem:
+        st.error("Fix the stage titles in the Stage Set-up tab first.")
+    elif not active_competitors:
+        st.warning("No active (non-DQ) competitors available for overall standings.")
+    else:
+        if excluded_stages:
+            st.info("Excluded from the overall totals (ICS classifier): " + ", ".join(sorted(excluded_stages)))
+        with st.expander("Overall Results (per division)", expanded=False):
+            for div in divisions_present:
+                sub = overall_div[overall_div["Division"] == div].reset_index(drop=True)
+                st.markdown(f"#### {div}")
+                show_centered_table(sub[OVERALL_COLS], {"Points": "{:.4f}", "%": "{:.2f}%"})
+                export_row(st.columns(2), f"{div} (Overall Standings)", safe(f"{match_name}_{div}_Overall_Standings"),
+                           overall_export_df(sub, False), f"ov_div_{div}")
+        with st.expander("Overall Results (all divisions)", expanded=False):
+            show_centered_table(overall_all[OVERALL_COLS], {"Points": "{:.4f}", "%": "{:.2f}%"})
+            export_row(st.columns(2), "All Divisions (Overall Standings)", safe(f"{match_name}_All_Divisions_Overall_Standings"),
+                       overall_export_df(overall_all, True), "ov_all")
+
+# ------------------------------------------
+# TAB 7: HIT BREAKDOWN AND GRAPHS
+# ------------------------------------------
+with tab_hits:
+    st.header("📈 Hit Breakdown and Graphs")
+    if title_problem:
+        st.error("Fix the stage titles in the Stage Set-up tab first.")
+    elif not active_competitors:
+        st.warning("No active (non-DQ) competitors available.")
+    else:
+        with st.expander("🔍 Cumulative Hit Breakdown", expanded=False):
+            scope = st.selectbox("Ranking scope", ["All Divisions"] + divisions_present, key="cum_scope")
+            base = overall_all if scope == "All Divisions" else overall_div[overall_div["Division"] == scope].reset_index(drop=True)
+            recs = []
+            for _, r in base.iterrows():
+                h = cum_hits(r["Competitor"])
+                recs.append({"Rank": r["Rank"], "%": f"{r['%']:.2f}%", "Points": f"{r['Points']:.4f}", "#": r["#"],
+                             "Competitor": r["Competitor"], "A": h["A"], "C": h["C"], "D": h["D"], "M": h["M"],
+                             "NS": h["NS"], "P": h["P"], "Total Time": f"{h['time']:.2f}"})
+            df_cum = pd.DataFrame(recs)
+            pick = st.selectbox("Select Competitor to inspect individual performance metrics:",
+                                options=base["Competitor"].tolist(), key="select_cum_inspect")
+            if pick:
+                ci = base[base["Competitor"] == pick].iloc[0]
+                cc = df_cum[df_cum["Competitor"] == pick].iloc[0]
+                m = st.columns(8)
+                m[0].metric("Rank", f"#{ci['Rank']}")
+                m[1].metric("Total Points", f"{ci['Points']:.2f}")
+                m[2].metric("Alpha (A)", cc["A"], help="Includes steel hits")
+                m[3].metric("Charlie (C)", cc["C"])
+                m[4].metric("Delta (D)", cc["D"])
+                m[5].metric("Mikes (M)", cc["M"])
+                m[6].metric("Penalties", cc["NS"] + cc["P"], help="NS + P")
+                m[7].metric("Total Time", f"{cc['Total Time']}s")
+            st.markdown("#### 📥 Export Full Roster Cumulative Breakdown")
+            export_row(st.columns(2), f"Full Roster Cumulative Hit & Time Summary - {scope}",
+                       safe(f"{match_name}_{scope}_Full_Roster_Cumulative_Summary"), df_cum, "cum_roster")
+
+        with st.expander("👤 Individual Player Report", expanded=False):
+            report_name = st.selectbox("Select Competitor for the player report:",
+                                       options=overall_all["Competitor"].tolist(), key="select_player_report")
+            if report_name:
+                rep = build_player_report(report_name, overall_div, overall_all, stage_div, stage_all,
+                                          stage_names, ss.scores, excluded_stages)
+                tot = rep["totals"]
+                st.markdown(f"**Division:** {rep['division']}")
+                k1, k2, k3, k4 = st.columns(4)
+                k1.metric(f"Rank in {rep['division']}", f"#{rep['rank_div']} of {rep['n_div']}" + (" (tied)" if rep["tied_div"] else ""))
+                k2.metric("Points (division)", f"{rep['points_div']:.2f}")
+                k3.metric("% of 1st (division)", f"{rep['percent_div']:.2f}%")
+                k4.metric("Behind 1st (division)", f"{rep['behind_div']:.2f}")
+                k5, k6, k7, k8 = st.columns(4)
+                k5.metric("Rank, all divisions", f"#{rep['rank_all']} of {rep['n_all']}" + (" (tied)" if rep["tied_all"] else ""))
+                k6.metric("Points (all divisions)", f"{rep['points_all']:.2f}")
+                k7.metric("% of 1st (all divisions)", f"{rep['percent_all']:.2f}%")
+                k8.metric("Total Time", f"{rep['total_time']:.2f}s")
+
+                h1, h2, h3, h4, h5, h6 = st.columns(6)
+                h1.metric("Alpha (A)", tot["A"], help="Includes steel hits")
+                h2.metric("Charlie (C)", tot["C"])
+                h3.metric("Delta (D)", tot["D"])
+                h4.metric("Mike (M)", tot["M"])
+                h5.metric("No-Shoot (NS)", tot["NS"])
+                h6.metric("Procedural (P)", tot["P"])
+
+                chart_col, stats_col = st.columns([3, 2])
+                with chart_col:
+                    if rep["png"]:
+                        st.image(rep["png"], caption="Hits only: A, C, D, M, NS")
+                    else:
+                        st.warning("The pie chart needs the matplotlib package. In Terminal run: "
+                                   "python3 -m pip install matplotlib   then restart the app.")
+                with stats_col:
+                    st.dataframe(pd.DataFrame(rep["highlights"], columns=["Highlight", "Value"]),
                                  hide_index=True, use_container_width=True)
 
-                    st.markdown("#### 📥 Export Player Report")
-                    pr_col1, pr_col2 = st.columns(2)
-                    pr_lines = [(match_name, 16, True), (f"{division} (Individual Player Report)", 12, False),
-                                (f"{report_name} (#{rep['num']})  |  Date: {match_date.strftime('%B %d, %Y')}", 10, False)]
-                    pr_file = f"{match_name}_{division}_{report_name}_Player_Report".replace("/", "-").replace("\\", "-")
-                    pdf_export_button(
-                        pr_col1, "📥 Download Player Report PDF (.pdf)", pr_file + ".pdf",
-                        pr_lines, None, key="dl_player_pdf", sections=rep["sections"], footer_df=rep["facts_df"],
-                    )
-                    word_export_button(
-                        pr_col2, "📥 Download Player Report Word (.docx)", pr_file + ".docx",
-                        pr_lines, None, key="dl_player_word", sections=rep["sections"], footer_df=rep["facts_df"],
-                    )
+                st.markdown(f"##### Stage-by-Stage Breakdown - {rep['division']} Division")
+                st.dataframe(pd.DataFrame(rep["stage_rows"], columns=rep["stage_header"]),
+                             hide_index=True, use_container_width=True)
+                st.markdown("##### Stage-by-Stage Results - All Divisions")
+                st.dataframe(pd.DataFrame(rep["all_rows"], columns=rep["all_header"]),
+                             hide_index=True, use_container_width=True)
+                if excluded_stages:
+                    st.caption("* ICS classifier stage excluded from the overall totals.")
 
-        else:
-            st.warning("No active competitors available for overall standings.")
+                st.markdown("#### 📥 Export Player Report")
+                pr_col1, pr_col2 = st.columns(2)
+                pr_lines = [(match_name, 16, True), (f"{rep['division']} (Individual Player Report)", 12, False),
+                            (f"{report_name} (#{rep['num']})  |  {date_line()}", 10, False)]
+                pr_file = safe(f"{match_name}_{rep['division']}_{report_name}_Player_Report")
+                pdf_export_button(pr_col1, "📥 Download Player Report PDF (.pdf)", pr_file + ".pdf",
+                                  pr_lines, None, key="dl_player_pdf", sections=rep["sections"], footer_df=rep["facts_df"])
+                word_export_button(pr_col2, "📥 Download Player Report Word (.docx)", pr_file + ".docx",
+                                   pr_lines, None, key="dl_player_word", sections=rep["sections"], footer_df=rep["facts_df"])
