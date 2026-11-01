@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 from datetime import date, datetime, timezone, timedelta
 import hashlib
+import re
 import html as _html
 import io
 import json
@@ -504,6 +505,14 @@ components.html(
     height=0,
 )
 
+def squad_of(c):
+    """Squad number of a competitor record (0 = no squad assigned). Old files without a Squad field give 0."""
+    try:
+        return max(0, int(c.get("Squad") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 def rank_min(values):
     """Competition ranking (1, 1, 3, ...) on EXACT values: only identical values tie."""
     return [1 + sum(1 for o in values if o > v) for v in values]
@@ -524,6 +533,8 @@ def merge_match_states(datasets):
             if d.get(key):
                 merged[key] = d[key]
                 break
+
+    merged["use_squads"] = any(bool(d.get("use_squads")) for _, d in datasets)
 
     logos = {}
     for side in ("left", "right"):
@@ -562,6 +573,7 @@ def merge_match_states(datasets):
                     entry.setdefault(f, "")
                 entry.setdefault("Division", DIVISIONS[0])
                 entry.setdefault("Power", "Minor")
+                entry["Squad"] = squad_of(entry)
                 entry["DQ"] = bool(entry.get("DQ", False))
                 try:
                     entry["#"] = int(entry.get("#"))
@@ -586,6 +598,10 @@ def merge_match_states(datasets):
                     e["DQ"] = True  # a DQ on any device stands
                 if c.get("Division") and c["Division"] != e["Division"]:
                     warnings.append(f"{name}: Division differs between files ({e['Division']} vs {c['Division']}). Kept {e['Division']}.")
+                if squad_of(c) and not e.get("Squad"):
+                    e["Squad"] = squad_of(c)      # fill in a missing squad from the other file
+                elif squad_of(c) and squad_of(c) != e["Squad"]:
+                    warnings.append(f"{name}: Squad differs between files (Squad {e['Squad']} vs Squad {squad_of(c)}). Kept Squad {e['Squad']}.")
                 if c.get("Power") and c["Power"] != e["Power"]:
                     warnings.append(f"{name}: Power factor differs between files ({e['Power']} vs {c['Power']}). Kept {e['Power']}.")
     # Numbers are never reassigned; only fill in a missing one with the next free number
@@ -732,8 +748,10 @@ def _export_footer_lines(lines, df):
         (",".join(map(str, df.columns)) + "\n" +
          "\n".join(",".join(_fmt_cell(v) for v in r) for r in df.itertuples(index=False, name=None))
          ).encode("utf-8")).hexdigest()[:8].upper()
-    line1 = f"Exported: {stamp} {tz}  |  Rows: {len(df)}  |  Data ID: {digest}"
-    line2 = "  |  ".join(text for text, _, _ in lines)
+    line1 = f"Date Exported: {stamp} {tz}  |  Rows: {len(df)}  |  Data ID: {digest}"
+    # the match date is already in the report header, so it is left out of the footer
+    shown = [re.sub(r"\s*\|?\s*Date:\s*[A-Za-z]+ \d{1,2}, \d{4}", "", text).strip(" |") for text, _, _ in lines]
+    line2 = "  |  ".join(t for t in shown if t)
     place = st.session_state.get("country", "")
     prov = st.session_state.get("province", "") if place == "Philippines" else st.session_state.get("province_text", "")
     line3 = "  |  ".join([
@@ -1441,6 +1459,33 @@ def _pdf_fonts():
     return _PDF_FONTS
 
 
+PDF_MIN_TABLE_PT = 6.0     # smallest table font the "All Divisions" PDF will shrink to
+PDF_MIN_NAME_PT = 5.0      # last-resort floor for the Competitor column alone
+
+
+def _fit_all_division_fonts(cols, rows, usable_in):
+    """Only used for PDFs that have the extra Division column ("All Divisions" scope).
+    Returns (table_pt, name_pt). The whole table keeps TABLE_FONT_PT when everything already fits on
+    one line; otherwise the font is reduced in 0.25 pt steps (never below PDF_MIN_TABLE_PT) until
+    every row fits on one line. If even that is not enough, only the Competitor column is shrunk
+    further (never below PDF_MIN_NAME_PT). name_pt is None when no per-column shrink is needed."""
+    def widths(pt):
+        return [max([_text_width_in(c, True, pt)] + [_text_width_in(r[i], False, pt) for r in rows]) + CELL_PAD_IN
+                for i, c in enumerate(cols)]
+
+    pt = TABLE_FONT_PT
+    while pt >= PDF_MIN_TABLE_PT - 1e-9:
+        if sum(widths(pt)) <= usable_in:
+            return pt, None
+        pt -= 0.25
+    pt = PDF_MIN_TABLE_PT
+    fit = widths(pt)
+    room = usable_in - (sum(fit) - fit[4]) - CELL_PAD_IN          # width left for the name text itself
+    longest = max([_text_width_in(r[4], False, pt) for r in rows] + [_text_width_in(cols[4], True, pt)])
+    name_pt = max(PDF_MIN_NAME_PT, pt * room / longest) if room > 0 and longest > 0 else PDF_MIN_NAME_PT
+    return pt, min(name_pt, pt)
+
+
 def build_pdf(lines, df, logo_left=None, logo_right=None, sections=None, footer_df=None):
     """PDF twin of build_word_docx: same page size/margins, logos, title lines, font, font size,
     column widths, alignment and shaded, repeating header row."""
@@ -1498,8 +1543,11 @@ def build_pdf(lines, df, logo_left=None, logo_right=None, sections=None, footer_
         right_idx, left_idx = {1, 2, 3}, {4}
         cols = list(df.columns)
         rows = [[_fmt_cell(v) for v in r] for r in df.itertuples(index=False, name=None)]
+        tbl_pt, name_pt = TABLE_FONT_PT, None
+        if "Division" in cols and len(cols) > 4:      # "All Divisions" file: keep every name on one line
+            tbl_pt, name_pt = _fit_all_division_fonts(cols, rows, usable_in)
         fit_w = [
-            max([_text_width_in(c, True)] + [_text_width_in(r[i], False) for r in rows]) + CELL_PAD_IN
+            max([_text_width_in(c, True, tbl_pt)] + [_text_width_in(r[i], False, tbl_pt) for r in rows]) + CELL_PAD_IN
             for i, c in enumerate(cols)
         ]
         col_w = list(fit_w)
@@ -1511,13 +1559,15 @@ def build_pdf(lines, df, logo_left=None, logo_right=None, sections=None, footer_
             ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
             ("FONTNAME", (0, 0), (-1, 0), bold),
             ("FONTNAME", (0, 1), (-1, -1), reg),
-            ("FONTSIZE", (0, 0), (-1, -1), TABLE_FONT_PT),
-            ("LEADING", (0, 0), (-1, -1), TABLE_FONT_PT * 1.15),
+            ("FONTSIZE", (0, 0), (-1, -1), tbl_pt),
+            ("LEADING", (0, 0), (-1, -1), tbl_pt * 1.15),
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F2F2F2")),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             ("LEFTPADDING", (0, 0), (-1, -1), 0.08 * inch), ("RIGHTPADDING", (0, 0), (-1, -1), 0.08 * inch),
             ("TOPPADDING", (0, 0), (-1, -1), 1.5), ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
         ]
+        if name_pt is not None:                       # last resort: shrink only the Competitor column
+            style.append(("FONTSIZE", (4, 1), (4, -1), name_pt))
         for i in range(len(cols)):
             a = "LEFT" if i in left_idx else "RIGHT" if i in right_idx else "CENTER"
             style.append(("ALIGN", (i, 0), (i, -1), a))
@@ -1652,6 +1702,7 @@ ss.setdefault("match_director", "")
 ss.setdefault("stats_director", "")
 ss.setdefault("num_stages", 1)
 ss.setdefault("config_done", False)
+ss.setdefault("use_squads", False)
 ss.setdefault("member_list", [])
 
 # ==========================================
@@ -1671,6 +1722,8 @@ if "pending_load" in ss:
     loaded_comps = data.get("competitors", [])
     for c in loaded_comps:
         c.setdefault("Division", DIVISIONS[0])
+        c["Squad"] = squad_of(c)
+    ss["use_squads"] = bool(data.get("use_squads", False))
     ss.competitors_list = loaded_comps
 
     parsed_scores = {}
@@ -1894,15 +1947,44 @@ if can_score:
 divisions_present = [d for d in DIVISIONS if any(c.get("Division") == d for c in active_competitors)]
 categories_present = [c for c in CAT_OPTIONS if c and any(x.get("Cat") == c for x in active_competitors)]
 ALL_DIV, ALL_CAT = "All Divisions", "All Categories"
+ALL_SQUAD, NO_SQUAD = "All Squads", "No Squad"
+squads_present = sorted({squad_of(c) for c in active_competitors if squad_of(c) > 0})
+has_unassigned_squad = any(squad_of(c) == 0 for c in active_competitors)
 
 
-def get_scope(div=None, cat=None):
-    """Stage tables and overall standings for one Division x Category combination.
-    div / cat = None means 'all'. Competitors are first narrowed to the chosen division and category,
-    then ranked among themselves, so Rank, Stage %, % and points are all relative to that group only.
+def squad_text(n):
+    """Display text for a squad number: 'Squad 3' (0 = 'No Squad')."""
+    return f"Squad {int(n)}" if int(n) > 0 else NO_SQUAD
+
+
+def squad_choices():
+    """Options of every Squad dropdown: All Squads, Squad 1, Squad 2 ... (and No Squad if some are unassigned)."""
+    return [ALL_SQUAD] + [squad_text(n) for n in squads_present] + \
+           ([NO_SQUAD] if squads_present and has_unassigned_squad else [])
+
+
+def squad_value(label):
+    """Dropdown text -> None (all squads), 0 (no squad) or the squad number."""
+    if label in (None, ALL_SQUAD):
+        return None
+    return 0 if label == NO_SQUAD else int(str(label).split()[-1])
+
+
+def get_scope(div=None, cat=None, squad=None):
+    """Stage tables and overall standings for one Division x Category x Squad combination.
+    div / cat / squad = None means 'all'. Competitors are first narrowed to the chosen division, category
+    and squad, then ranked among themselves, so Rank, Stage %, % and points are all relative to that group only.
     Returns ({stage name: table}, overall table); both empty when nobody matches."""
     if not can_score:
         return {}, pd.DataFrame()
+    if squad is not None:
+        subset = [c for c in active_competitors
+                  if (div is None or c.get("Division") == div) and (cat is None or c.get("Cat") == cat)
+                  and squad_of(c) == squad]
+        if not subset:
+            return {}, pd.DataFrame()
+        tables = {s: build_stage_table(s, subset, ss.scores, stage_config[s], False) for s in stage_names}
+        return tables, build_overall(subset, tables, included_stages, False)
     if cat is None:                      # the original four-way tables are already built
         if div is None:
             return stage_all, overall_all
@@ -1916,23 +1998,37 @@ def get_scope(div=None, cat=None):
     return tables, build_overall(subset, tables, included_stages, False)
 
 
-def scope_text(div, cat):
-    """Readable name of a scope, e.g. 'Open - Lady (L)'."""
-    return (div or ALL_DIV) + ("" if cat is None else f" - {cat_label(cat)}")
+def scope_text(div, cat, squad=None):
+    """Readable name of a scope, e.g. 'Open - Lady (L) - Squad 2'. The squad part appears only when a
+    specific squad is chosen, so 'All Squads' (and matches without squads) read exactly as before."""
+    return ((div or ALL_DIV) + ("" if cat is None else f" - {cat_label(cat)}")
+            + ("" if squad is None else f" - {squad_text(squad)}"))
 
 
-def scope_file(div, cat):
+def scope_file(div, cat, squad=None):
     """Same, safe for file names."""
-    return (div or "All_Divisions").replace(" ", "_") + ("" if cat is None else f"_Cat_{cat}")
+    return ((div or "All_Divisions").replace(" ", "_") + ("" if cat is None else f"_Cat_{cat}")
+            + ("" if squad is None else f"_{squad_text(squad).replace(' ', '_')}"))
 
 
-def scope_pickers(key_prefix, div_label="Division", cat_label_text="Category"):
-    """Division + Category dropdowns side by side. Returns (div or None, cat or None)."""
-    pc1, pc2 = st.columns(2)
-    d = pc1.selectbox(div_label, [ALL_DIV] + divisions_present, key=f"{key_prefix}_div")
-    c = pc2.selectbox(cat_label_text, [ALL_CAT] + categories_present, key=f"{key_prefix}_cat",
-                      format_func=lambda x: x if x == ALL_CAT else cat_label(x))
-    return (None if d == ALL_DIV else d), (None if c == ALL_CAT else c)
+def no_match_msg():
+    return ("No competitors match this Division, Category and Squad." if ss["use_squads"]
+            else "No competitors match this Division and Category.")
+
+
+def scope_pickers(key_prefix, div_label="Division", cat_label_text="Category", squad_label_text="Squad"):
+    """Division, Category (and Squad, only when the match uses squads) dropdowns stacked in one column.
+    Returns (div or None, cat or None, squad or None)."""
+    d = st.selectbox(div_label, [ALL_DIV] + divisions_present, key=f"{key_prefix}_div")
+    c = st.selectbox(cat_label_text, [ALL_CAT] + categories_present, key=f"{key_prefix}_cat",
+                     format_func=lambda x: x if x == ALL_CAT else cat_label(x))
+    sq = None
+    if ss["use_squads"]:
+        opts = squad_choices()
+        if ss.get(f"{key_prefix}_squad") not in opts:      # that squad no longer exists
+            ss.pop(f"{key_prefix}_squad", None)
+        sq = squad_value(st.selectbox(squad_label_text, opts, key=f"{key_prefix}_squad"))
+    return (None if d == ALL_DIV else d), (None if c == ALL_CAT else c), sq
 
 
 def date_line():
@@ -1953,6 +2049,7 @@ match_state_data = {
     "country": ss["country"],
     "province": ss["province"] if ss["country"] == "Philippines" else ss["province_text"],
     "match_level": ss["match_level"],
+    "use_squads": bool(ss["use_squads"]),
     "range_master": ss["range_master"],
     "match_director": ss["match_director"],
     "stats_director": ss["stats_director"],
@@ -2223,6 +2320,9 @@ with tab_cfg:
         st.text_input("Range Master", key="range_master", disabled=locked)
         st.text_input("Match Director", key="match_director", disabled=locked)
         st.text_input("Stats Director", key="stats_director", disabled=locked)
+    st.checkbox("Use Squads", key="use_squads", disabled=locked,
+                help="When checked, every competitor gets a squad number in the Competitor Roster, and Match Scoring "
+                     "and Results get a Squad dropdown.")
 
     if locked:
         if st.button("✏️ Edit Match Configuration", key="cfg_edit"):
@@ -2281,6 +2381,10 @@ with main_tab_roster:
                 _by_label = {f"{m['Competitor']}  ({m['Division']})": m for m in _avail}
                 _picked = st.multiselect("Select members to add (type to search)", list(_by_label),
                                          key="roster_from_member_sel")
+                _m_squad = 0
+                if ss["use_squads"]:
+                    _m_squad = int(st.number_input("Squad # for these competitors (0 = no squad)", min_value=0, step=1,
+                                                   value=0, key="roster_from_member_squad"))
                 st.caption("Each gets the next free competitor # and keeps the details saved in the Member List. "
                            "Use Edit or Delete Competitor to change details afterwards.")
                 if st.button("➕ Add Selected to Roster", key="roster_from_member_btn", disabled=not _picked):
@@ -2290,7 +2394,7 @@ with main_tab_roster:
                         ss.competitors_list.append({
                             "#": _next, "Competitor": m["Competitor"], "Division": m["Division"], "Cat": m["Cat"],
                             "Reg": m["Reg"], "Cls": m["Cls"], "Tag": m["Tag"], "ICS": m["ICS"],
-                            "Power": m["Power"], "DQ": False})
+                            "Power": m["Power"], "Squad": _m_squad, "DQ": False})
                         _next += 1
                     ss["member_roster_msg"] = f"Added {len(_picked)} competitor(s) to the Roster."
                     ss.pop("roster_from_member_sel", None)
@@ -2309,6 +2413,9 @@ with main_tab_roster:
                 c_ics = st.text_input("ICS", value="")
                 c_power = st.selectbox("Power", ["Minor", "Major"], key="add_power",
                                        help="Production, Production Optics and PCC are Minor only.")
+                c_squad = 0
+                if ss["use_squads"]:
+                    c_squad = int(st.number_input("Squad # (0 = no squad)", min_value=0, step=1, value=0, key="add_squad"))
                 c_dq = st.checkbox("Disqualified (DQ)", value=False, key="add_dq")
 
                 if st.form_submit_button("➕ Add Competitor"):
@@ -2324,7 +2431,8 @@ with main_tab_roster:
                     else:
                         ss.competitors_list.append({
                             "#": int(c_num), "Competitor": new_comp_name, "Division": c_div, "Cat": c_cat,
-                            "Reg": c_reg, "Cls": c_cls, "Tag": c_tag, "ICS": c_ics, "Power": c_power, "DQ": c_dq})
+                            "Reg": c_reg, "Cls": c_cls, "Tag": c_tag, "ICS": c_ics, "Power": c_power,
+                            "Squad": c_squad, "DQ": c_dq})
                         st.success(f"Added {new_comp_name} successfully!")
                         st.rerun()
 
@@ -2347,6 +2455,10 @@ with main_tab_roster:
                     e_ics = st.text_input("ICS", value=current_data["ICS"])
                     pf_list = ["Minor", "Major"]
                     e_power = st.selectbox("Power", pf_list, index=pf_list.index(current_data["Power"]) if current_data["Power"] in pf_list else 0, key=f"edit_power_{fv}_{selected_to_edit}")
+                    e_squad = squad_of(current_data)
+                    if ss["use_squads"]:
+                        e_squad = int(st.number_input("Squad # (0 = no squad)", min_value=0, step=1, value=squad_of(current_data),
+                                                      key=f"edit_squad_{fv}_{selected_to_edit}"))
                     e_dq = st.checkbox("Disqualified (DQ)", value=bool(current_data.get("DQ", False)), key=f"edit_dq_{fv}_{selected_to_edit}")
 
                     b_col1, b_col2 = st.columns(2)
@@ -2371,7 +2483,7 @@ with main_tab_roster:
                                 ss["pending_rename"] = (selected_to_edit, new_name)
                             current_data.update({"Competitor": new_name, "#": int(e_num), "Division": e_div,
                                                  "Cat": e_cat, "Reg": e_reg, "Cls": e_cls, "Tag": e_tag,
-                                                 "ICS": e_ics, "Power": e_power, "DQ": e_dq})
+                                                 "ICS": e_ics, "Power": e_power, "Squad": e_squad, "DQ": e_dq})
                             st.success("Competitor updated successfully!")
                             st.rerun()
 
@@ -2388,6 +2500,9 @@ with main_tab_roster:
         df_roster = pd.DataFrame(ss.competitors_list)
         df_roster["Division"] = df_roster.get("Division", DIVISIONS[0])
         cols = ["#", "Competitor", "Division", "Cat", "Reg", "Cls", "Tag", "ICS", "Power", "DQ"]
+        if ss["use_squads"]:
+            df_roster["Squad"] = [squad_text(squad_of(c)) for c in ss.competitors_list]
+            cols.insert(3, "Squad")
         df_roster = df_roster[cols].sort_values("#").reset_index(drop=True)
         st.dataframe(df_roster, hide_index=True, use_container_width=True)
     else:
@@ -2472,13 +2587,32 @@ with tab_scoring:
                 st.info(f"Targets: **{cfg['paper']} Paper** | **{cfg['disappearing']} Disappearing** | **{cfg['plates']} Plates** | "
                         f"**{cfg['poppers']} Poppers** | **{cfg['penalty']} Penalty** | Minimum Rounds: **{cfg['min_rounds']}** | "
                         f"Max Points: **{cfg['max_pts']}**")
+                pool, sel_key = active_competitors, f"select_{si}"
+                if ss["use_squads"]:
+                    # squad first; the competitor list below then only shows that squad
+                    sq_opts = squad_choices()
+                    if ss.get(f"squad_sel_{si}") not in sq_opts:      # that squad no longer exists
+                        ss.pop(f"squad_sel_{si}", None)
+                    sq_val = squad_value(st.selectbox("Select Squad", sq_opts, key=f"squad_sel_{si}"))
+                    if sq_val is not None:
+                        pool = [c for c in active_competitors if squad_of(c) == sq_val]
+                    sel_key = f"select_{si}_sq{'all' if sq_val is None else sq_val}"   # own selection per squad
+                    if not pool:
+                        st.info("No active competitors in this squad.")
+                        continue
+                    if ss.get(sel_key) not in [c["Competitor"] for c in pool]:   # e.g. competitor moved to another squad
+                        ss.pop(sel_key, None)
                 selected_shooter = st.selectbox("Select Competitor to Enter Score",
-                                                options=[c["Competitor"] for c in active_competitors], key=f"select_{si}")
-                shooter_info = next(c for c in active_competitors if c["Competitor"] == selected_shooter)
+                                                options=[c["Competitor"] for c in pool], key=sel_key)
+                shooter_info = next(c for c in pool if c["Competitor"] == selected_shooter)
                 pf = shooter_info["Power"]
 
                 roster_cols = ["#", "Competitor", "Division", "Cat", "Reg", "Cls", "Tag", "ICS", "Power", "DQ"]
-                st.dataframe(pd.DataFrame([shooter_info]).reindex(columns=roster_cols), hide_index=True, use_container_width=True)
+                shooter_row = dict(shooter_info)
+                if ss["use_squads"]:
+                    shooter_row["Squad"] = squad_text(squad_of(shooter_info))
+                    roster_cols.insert(3, "Squad")
+                st.dataframe(pd.DataFrame([shooter_row]).reindex(columns=roster_cols), hide_index=True, use_container_width=True)
 
                 key = (s_name, selected_shooter)
                 existing = ss.scores.get(key, {})
@@ -2588,8 +2722,17 @@ def stage_export_df(df, with_division):
     return out
 
 
-def export_row(container_cols, title_line, file_stub, df_export, key):
-    lines = [(match_name, 16, True), (title_line, 12, False), (date_line(), 10, False)]
+def export_title_lines(div, cat, squad, what, results=True):
+    """Header lines of an export:
+    Match name / [Category - Squad, only the ones specifically chosen] / Division - <what> Results / Date."""
+    parts = ([] if cat is None else [cat_label(cat)]) + ([] if squad is None else [squad_text(squad)])
+    mid = [(" - ".join(parts), 12, False)] if parts else []
+    mid.append((f"{div or ALL_DIV} - {what}" + (" Results" if results else ""), 12, False))
+    return mid
+
+
+def export_row(container_cols, title_lines, file_stub, df_export, key):
+    lines = [(match_name, 16, True)] + title_lines + [(date_line(), 10, False)]
     pdf_export_button(container_cols[0], "📥 Download PDF (.pdf)", file_stub + ".pdf", lines, df_export, key=f"pdf_{key}")
     word_export_button(container_cols[1], "📥 Download Word (.docx)", file_stub + ".docx", lines, df_export, key=f"word_{key}")
 
@@ -2616,13 +2759,13 @@ with tab_results:
     else:
         # ---------- STAGE RESULTS ----------
         with st.expander("📊 Stage Results", expanded=False):
-            sr_div, sr_cat = scope_pickers("stage_res")
-            sr_tables, _ = get_scope(sr_div, sr_cat)
+            sr_div, sr_cat, sr_sq = scope_pickers("stage_res")
+            sr_tables, _ = get_scope(sr_div, sr_cat, sr_sq)
             if not sr_tables:
-                st.info("No competitors match this Division and Category.")
+                st.info(no_match_msg())
             else:
                 st.caption(f"Stage % and points compare each competitor with the best hit factor among: "
-                           f"{scope_text(sr_div, sr_cat)}.")
+                           f"{scope_text(sr_div, sr_cat, sr_sq)}.")
                 stabs = st.tabs(stage_names)
                 for s_name, stab in zip(stage_names, stabs):
                     si = stage_config[s_name]["idx"]
@@ -2631,24 +2774,24 @@ with tab_results:
                             st.info("ICS classifier stage: shown here, but left out of the overall results.")
                         df = sr_tables[s_name]
                         show_centered_table(df[STAGE_VIEW_COLS], STAGE_FMT)
-                        export_row(st.columns(2), f"{scope_text(sr_div, sr_cat)} ({s_name})",
-                                   safe(f"{match_name}_{scope_file(sr_div, sr_cat)}_{s_name}_Results"),
-                                   stage_export_df(df, sr_div is None), f"stg_{si}_{scope_file(sr_div, sr_cat)}")
+                        export_row(st.columns(2), export_title_lines(sr_div, sr_cat, sr_sq, s_name),
+                                   safe(f"{match_name}_{scope_file(sr_div, sr_cat, sr_sq)}_{s_name}_Results"),
+                                   stage_export_df(df, sr_div is None), f"stg_{si}_{scope_file(sr_div, sr_cat, sr_sq)}")
 
         # ---------- OVERALL RESULTS ----------
         with st.expander("🏆 Overall Results", expanded=False):
             if excluded_stages:
                 st.info("Excluded from the overall totals (ICS classifier): " + ", ".join(sorted(excluded_stages)))
-            ov_div, ov_cat = scope_pickers("overall_res")
-            _, ov_df = get_scope(ov_div, ov_cat)
+            ov_div, ov_cat, ov_sq = scope_pickers("overall_res")
+            _, ov_df = get_scope(ov_div, ov_cat, ov_sq)
             if ov_df.empty:
-                st.info("No competitors match this Division and Category.")
+                st.info(no_match_msg())
             else:
-                st.caption(f"Ranking, % and points compare each competitor only with: {scope_text(ov_div, ov_cat)}.")
+                st.caption(f"Ranking, % and points compare each competitor only with: {scope_text(ov_div, ov_cat, ov_sq)}.")
                 show_centered_table(ov_df[OVERALL_COLS], {"Points": "{:.4f}", "%": "{:.2f}%"})
-                export_row(st.columns(2), f"{scope_text(ov_div, ov_cat)} (Overall Standings)",
-                           safe(f"{match_name}_{scope_file(ov_div, ov_cat)}_Overall_Standings"),
-                           overall_export_df(ov_df, ov_div is None), f"ov_{scope_file(ov_div, ov_cat)}")
+                export_row(st.columns(2), export_title_lines(ov_div, ov_cat, ov_sq, "Overall"),
+                           safe(f"{match_name}_{scope_file(ov_div, ov_cat, ov_sq)}_Overall_Standings"),
+                           overall_export_df(ov_df, ov_div is None), f"ov_{scope_file(ov_div, ov_cat, ov_sq)}")
 
 # ------------------------------------------
 # TAB 6: HIT BREAKDOWN AND GRAPHS
@@ -2661,11 +2804,12 @@ with tab_hits:
         st.warning("No active (non-DQ) competitors available.")
     else:
         with st.expander("🔍 Cumulative Hit Breakdown", expanded=False):
-            cum_div, cum_cat = scope_pickers("cum", "Ranking scope (Division)", "Ranking scope (Category)")
-            scope = scope_text(cum_div, cum_cat)
-            _, base = get_scope(cum_div, cum_cat)
+            cum_div, cum_cat, cum_sq = scope_pickers("cum", "Ranking scope (Division)", "Ranking scope (Category)",
+                                                     "Ranking scope (Squad)")
+            scope = scope_text(cum_div, cum_cat, cum_sq)
+            _, base = get_scope(cum_div, cum_cat, cum_sq)
             if base.empty:
-                st.info("No competitors match this Division and Category.")
+                st.info(no_match_msg())
             else:
                 st.caption(f"Rank, % and points compare each competitor only with: {scope}.")
                 recs = []
@@ -2676,7 +2820,7 @@ with tab_hits:
                                  "NS": h["NS"], "P": h["P"], "Total Time": f"{h['time']:.2f}"})
                 df_cum = pd.DataFrame(recs)
                 pick = st.selectbox("Select Competitor to inspect individual performance metrics:",
-                                    options=base["Competitor"].tolist(), key=f"select_cum_inspect_{scope_file(cum_div, cum_cat)}")
+                                    options=base["Competitor"].tolist(), key=f"select_cum_inspect_{scope_file(cum_div, cum_cat, cum_sq)}")
                 if pick:
                     ci = base[base["Competitor"] == pick].iloc[0]
                     cc = df_cum[df_cum["Competitor"] == pick].iloc[0]
@@ -2686,8 +2830,8 @@ with tab_hits:
                         "Total Time": f"{cc['Total Time']}s"}]), center_all=True, fit=True)
                     st.caption("A includes steel hits. P = procedural penalties.")
                 st.markdown("#### 📥 Export Full Roster Cumulative Breakdown")
-                export_row(st.columns(2), f"Full Roster Cumulative Hit & Time Summary - {scope}",
-                           safe(f"{match_name}_{scope_file(cum_div, cum_cat)}_Full_Roster_Cumulative_Summary"), df_cum, "cum_roster")
+                export_row(st.columns(2), export_title_lines(cum_div, cum_cat, cum_sq, "Cumulative Summary", results=False),
+                           safe(f"{match_name}_{scope_file(cum_div, cum_cat, cum_sq)}_Full_Roster_Cumulative_Summary"), df_cum, "cum_roster")
 
         with st.expander("👤 Individual Player Report", expanded=False):
             report_name = st.selectbox("Select Competitor for the player report:",
