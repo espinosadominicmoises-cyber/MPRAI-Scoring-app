@@ -488,7 +488,101 @@ _EMBEDDED_LOGOS = {
 """,
 }
 
-st.set_page_config(page_title="IPSC Match Scoring System", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="IPSC Match Scoring System", page_icon="🎯", layout="wide", initial_sidebar_state="collapsed")
+_THEME_CSS = r"""
+@import url('https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Semi+Condensed:wght@500;600;700&display=swap');
+:root{--pine:#1E293B;--pine-d:#1E293B;--brass:#F59E0B;--line:rgba(128,128,128,.28)}
+.stApp,.stApp p,.stApp label,.stApp li,.stApp input,.stApp textarea,.stApp button,.stApp [data-baseweb]{font-family:'Barlow',system-ui,'Segoe UI',Arial,sans-serif!important}
+.stApp h1,.stApp h2,.stApp h3,.stApp h4,.stApp h5,.pg-head h2,.banner h1,.b-stats b,.ct th,[data-testid="stMetricValue"]{font-family:'Barlow Semi Condensed','Barlow',system-ui,Arial,sans-serif!important}
+.block-container{padding-top:1.6rem;max-width:1280px}
+header[data-testid="stHeader"]{background:transparent}
+.stApp h3{font-size:1.25rem;font-weight:700;margin-top:1.4rem}
+.pg-head{margin:.3rem 0 1rem}
+.pg-head h2{margin:0;padding:0;font-size:1.6rem;font-weight:700}
+.banner{background:var(--pine-d);color:#F8FAFC;border-radius:8px;padding:1.1rem 1.4rem .9rem;margin:0 0 1.2rem;display:flex;flex-wrap:wrap;gap:1rem 2rem;align-items:flex-end;justify-content:space-between}
+.banner h1{margin:0;padding:0;font-size:2.2rem;line-height:1.1;font-weight:700;color:#fff}
+.b-meta{display:flex;flex-wrap:wrap;margin-top:.5rem;font-size:.95rem;color:#CBD5E1}
+.b-meta span+span{margin-left:.9rem;padding-left:.9rem;border-left:1px solid rgba(255,255,255,.28)}
+.b-stats{display:flex;gap:1.9rem}
+.b-stats div{display:flex;flex-direction:column}
+.b-stats b{font-size:2rem;line-height:1;font-weight:700;font-variant-numeric:tabular-nums;color:#fff}
+.b-stats span{font-size:.82rem;color:#CBD5E1;margin-top:.25rem}
+.b-bar{flex-basis:100%;height:4px;background:rgba(255,255,255,.16);border-radius:2px;overflow:hidden}
+.b-bar i{display:block;height:100%;background:var(--brass)}
+.stTabs [data-baseweb="tab-list"]{gap:.2rem;border-bottom:1px solid var(--line)}
+.stTabs [data-baseweb="tab"]{height:2.7rem;padding:0 1rem;font-weight:600}
+.stTabs [data-baseweb="tab-highlight"]{background:var(--brass);height:3px}
+.stButton button,.stDownloadButton button,[data-testid="stFormSubmitButton"] button{border-radius:6px;font-weight:600;padding:.45rem 1.1rem;border:1px solid var(--line);transition:background .12s,border-color .12s}
+.stButton button:hover,.stDownloadButton button:hover,[data-testid="stFormSubmitButton"] button:hover{border-color:var(--pine)}
+button[kind="primary"],button[kind="primaryFormSubmit"],[data-testid="stBaseButton-primary"],[data-testid="stBaseButton-primaryFormSubmit"]{background:var(--pine)!important;border-color:var(--pine)!important;color:#fff!important}
+button[kind="primary"]:hover,button[kind="primaryFormSubmit"]:hover,[data-testid="stBaseButton-primary"]:hover,[data-testid="stBaseButton-primaryFormSubmit"]:hover{background:#FBBF24!important}
+button[kind="primary"] p,button[kind="primaryFormSubmit"] p,[data-testid="stBaseButton-primary"] p,[data-testid="stBaseButton-primaryFormSubmit"] p{color:#fff!important}
+button:focus-visible{outline:2px solid var(--brass)!important;outline-offset:2px}
+.st-key-confirm_delete button{background:#B3261E!important;border-color:#B3261E!important}
+[data-testid="stExpander"]{border:1px solid var(--line);border-radius:8px}
+[data-testid="stExpander"] summary{font-weight:600}
+[data-testid="stForm"]{border:1px solid var(--line);border-radius:8px;padding:1rem 1.1rem}
+[data-testid="stMetric"]{border-left:3px solid rgba(203,213,225,.35);padding:.1rem .8rem}
+[data-testid="stMetricValue"]{font-weight:700;font-variant-numeric:tabular-nums}
+[data-testid="stAlert"]{border-radius:6px}
+section[data-testid="stSidebar"]{border-right:1px solid var(--line)}
+section[data-testid="stSidebar"] h2{font-size:1.2rem;font-weight:700}
+button[kind="primary"],button[kind="primaryFormSubmit"],[data-testid="stBaseButton-primary"],[data-testid="stBaseButton-primaryFormSubmit"]{background:var(--brass)!important;border-color:var(--brass)!important;color:#0B132B!important}
+button[kind="primary"]:hover,button[kind="primaryFormSubmit"]:hover,[data-testid="stBaseButton-primary"]:hover,[data-testid="stBaseButton-primaryFormSubmit"]:hover{background:#FBBF24!important}
+button[kind="primary"] p,button[kind="primaryFormSubmit"] p,[data-testid="stBaseButton-primary"] p,[data-testid="stBaseButton-primaryFormSubmit"] p{color:#0B132B!important}
+.brand{font-family:'Barlow Semi Condensed',Arial,sans-serif;font-size:1.5rem;font-weight:700;line-height:1.1;padding:.2rem .4rem .8rem;border-bottom:1px solid var(--line);margin-bottom:.8rem}
+.brand span{display:block;font-size:.8rem;font-weight:500;opacity:.65;margin-top:.2rem}
+section[data-testid="stSidebar"] [role="radiogroup"]{gap:.15rem}
+section[data-testid="stSidebar"] [role="radiogroup"] label{padding:.55rem .8rem;border-radius:6px;width:100%;cursor:pointer}
+section[data-testid="stSidebar"] [role="radiogroup"] label > div:first-child{display:none}
+section[data-testid="stSidebar"] [role="radiogroup"] label:hover{background:rgba(128,128,128,.14)}
+section[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked){background:rgba(245,158,11,.18);box-shadow:inset 3px 0 0 var(--brass);font-weight:700}
+.sp{display:grid;grid-template-columns:minmax(6rem,14rem) 1fr 4.5rem;gap:.8rem;align-items:center;margin:.45rem 0}
+.sp b{text-align:right;font-variant-numeric:tabular-nums}
+[class*="st-key-tile_"] button{min-height:3.6rem;font-size:1.1rem}
+.ms{display:grid;gap:.8rem;margin:.3rem 0 .9rem}
+.ms.g3{grid-template-columns:repeat(3,1fr)}
+.ms.g4{grid-template-columns:repeat(4,1fr)}
+.mc{background:rgba(148,163,184,.10);border:1px solid rgba(148,163,184,.22);border-radius:8px;padding:.9rem 1.1rem}
+.mc b{display:block;font-family:'Barlow Semi Condensed','Barlow',Arial,sans-serif;font-size:2.3rem;line-height:1;font-weight:700;font-variant-numeric:tabular-nums}
+.mc.big b{font-size:3rem}
+.mc span{display:block;margin-top:.4rem;font-size:.92rem;opacity:.85}
+.mc small{display:block;margin-top:.1rem;font-size:.78rem;opacity:.6}
+.mc u{display:inline-block;width:.7rem;height:.7rem;border-radius:2px;margin-right:.45rem;vertical-align:-1px}
+.mix{display:flex;height:10px;border-radius:5px;overflow:hidden;margin:.2rem 0 .8rem;background:rgba(148,163,184,.15)}
+.mix i{display:block;height:100%}
+@media(max-width:700px){.ms.g3,.ms.g4{grid-template-columns:repeat(2,1fr)}}
+.ss{display:flex;align-items:baseline;gap:.8rem;flex-wrap:wrap;margin:.1rem 0 .7rem}
+.ss b{font-family:'Barlow Semi Condensed','Barlow',Arial,sans-serif;font-size:1.7rem;font-weight:700}
+.ss span{opacity:.7}
+.sr{padding:.6rem 0;border-top:1px solid var(--line)}
+.sh{display:flex;justify-content:space-between;font-weight:600}
+.sh em{font-style:normal;opacity:.7;font-weight:500}
+.pl{display:flex;flex-wrap:wrap;gap:.35rem;margin-top:.45rem}
+.pill{background:rgba(148,163,184,.16);border:1px solid rgba(148,163,184,.28);border-radius:999px;padding:.12rem .7rem;font-size:.85rem}
+.sdone{margin-top:.6rem;font-size:.9rem;opacity:.7}
+.pend{font-size:.85rem;opacity:.7;margin:-.2rem 0 .7rem}
+.sbar{height:10px;background:rgba(128,128,128,.22);border-radius:5px;overflow:hidden}
+.sbar i{display:block;height:100%;background:var(--brass)}
+@media(max-width:700px){.banner h1{font-size:1.6rem}.b-stats{gap:1.1rem}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+"""
+st.markdown("<style>" + _THEME_CSS + "</style>", unsafe_allow_html=True)
+
+
+def _mark_export(page):
+    st.session_state.setdefault("exported", set()).add(page)
+
+
+def _go(page):
+    st.session_state["nav"] = page
+
+
+def page_head(title):
+    if st.session_state.get("config_done") and st.session_state.get("nav") != "Dashboard":
+        st.button("Back to dashboard", key=f"back_{st.session_state.get('nav')}", on_click=_go, args=("Dashboard",))
+    st.markdown(f"<div class='pg-head'><h2>{_html.escape(title)}</h2></div>", unsafe_allow_html=True)
+
 
 # ==========================================
 # BROWSER REFRESH / CLOSE CONFIRMATION PROMPT
@@ -957,17 +1051,17 @@ def show_centered_table(df, formats=None, center_all=False, fit=False, bold_last
                     txt = str(v)
             else:
                 txt = str(v)
-            tds.append(f'<td class="{"num" if c in numeric else "txt"}">{_html.escape(txt)}</td>')
+            tds.append(f'<td class="{"num" if c in numeric else "txt"}{" top" if c == "Rank" and txt in ("1", "2", "3") else ""}">{_html.escape(txt)}</td>')
         body.append("<tr>" + "".join(tds) + "</tr>")
     css = (
         ".ct-wrap{overflow-x:auto;margin:0.25rem 0 1rem 0;border:1px solid rgba(128,128,128,.35);border-radius:8px}"
         + (".ct-wrap.fit{display:inline-block;max-width:100%}.ct{width:auto!important}" if fit else "") +
         ".ct{border-collapse:collapse;width:100%;font-size:0.875rem;color:inherit}"
-        ".ct th{text-align:center;font-weight:700;padding:8px 12px;background:rgba(128,128,128,.16);"
+        ".ct th{text-align:center;font-weight:700;padding:8px 12px;background:rgba(148,163,184,.20);"
         "border-bottom:1px solid rgba(128,128,128,.4);white-space:nowrap}"
         ".ct td{padding:6px 12px;border-bottom:1px solid rgba(128,128,128,.18);white-space:nowrap}"
         ".ct td.num{text-align:center;font-variant-numeric:tabular-nums}"
-        ".ct td.txt{text-align:left}"
+        ".ct td.txt{text-align:left}.ct td.top{font-weight:700;box-shadow:inset 3px 0 0 #F59E0B}"
         ".ct tr:nth-child(even) td{background:rgba(128,128,128,.07)}"
         ".ct tr:last-child td{border-bottom:none}"
         + (".ct tr:last-child td{font-weight:700}" if bold_last else "") +
@@ -1066,6 +1160,12 @@ def _scope_stage_rows(name, tables, ov, stage_names, excluded, scores):
     me = ov[ov["Competitor"] == name].iloc[0]
     rows.append(["Total", f"{int(me['Rank'])}/{len(ov)}", f"{pts_tot:.4f}", f"{float(me['%']):.2f}%", ""])
     return rows
+
+
+def _no_pct(header, rows):
+    """Export only: remove the trailing % from the cells of the column headed '%'."""
+    i = header.index("%")
+    return [[c[:-1] if k == i and isinstance(c, str) and c.endswith("%") else c for k, c in enumerate(r)] for r in rows]
 
 
 def build_player_report(name, ov_div, ov_all, st_div, st_all, stage_names, scores, excluded, extra=None):
@@ -1203,19 +1303,19 @@ def build_player_report(name, ov_div, ov_all, st_div, st_all, stage_names, score
     sections += [
         ("pagebreak",),
         ("heading", f"Stage-by-Stage Breakdown - {div} Division (All Categories)"),
-        ("table", {"header": stage_header, "rows": div_rows, "bold_last": True, "flex": 0,
+        ("table", {"header": stage_header, "rows": _no_pct(stage_header, div_rows), "bold_last": True, "flex": 0,
                    "aligns": ["L", "C", "R", "R", "R", "R", "C", "C", "C", "C", "C", "C"]}),
         ("note", "Rank = placing on that stage among competitors in the same division. Pts = stage points. % = share of the "
                  "division stage winner's hit factor (Total row: share of the division leader's points). HF = hit factor."),
         ("heading", "Stage-by-Stage Results - All Divisions (All Categories)"),
-        ("table", {"header": all_header, "rows": all_rows, "bold_last": True, "flex": 0,
+        ("table", {"header": all_header, "rows": _no_pct(all_header, all_rows), "bold_last": True, "flex": 0,
                    "aligns": ["L", "C", "R", "R", "R"]}),
         ("note", "Rank, Pts and % here compare the competitor against everyone in the match, regardless of division."
                  + (" Stages marked * are ICS classifier stages excluded from the overall totals." if excluded else "")),
     ]
     for _head, _rows, _note in cat_tables:
         sections += [("heading", _head),
-                     ("table", {"header": all_header, "rows": _rows, "bold_last": True, "flex": 0,
+                     ("table", {"header": all_header, "rows": _no_pct(all_header, _rows), "bold_last": True, "flex": 0,
                                 "aligns": ["L", "C", "R", "R", "R"]}),
                      ("note", _note)]
     sections += [
@@ -1427,6 +1527,7 @@ def word_export_button(container, label, file_name, lines, df, key=None, section
         file_name=file_name,
         mime=DOCX_MIME,
         key=key,
+        on_click=_mark_export, args=(st.session_state.get("nav"),),
     )
 
 
@@ -1627,12 +1728,14 @@ def pdf_export_button(container, label, file_name, lines, df, key=None, sections
         file_name=file_name,
         mime="application/pdf",
         key=key,
+        on_click=_mark_export, args=(st.session_state.get("nav"),),
     )
 
 
 DIVISIONS = ["Production", "Production Optics", "Standard", "Standard Optics", "Classic", "Open", "Revolver", "PCC"]
 PF_MINOR_ONLY = {"Production", "Production Optics", "PCC"}
 MATCH_LEVELS = ["Level I", "Level II", "Level III", "Level IV", "Level V"]
+SQUAD_LEVELS = ("Level III", "Level IV", "Level V")
 CAT_OPTIONS = ["", "L", "LS", "S", "SS", "GS", "J", "SJ"]
 CAT_NAMES = {"L": "Lady", "LS": "Lady Senior", "S": "Senior", "SS": "Super Senior",
              "GS": "Grand Senior", "J": "Junior", "SJ": "Super Junior"}
@@ -1704,6 +1807,10 @@ ss.setdefault("num_stages", 1)
 ss.setdefault("config_done", False)
 ss.setdefault("use_squads", False)
 ss.setdefault("member_list", [])
+for _k in ("match_name", "match_date", "match_level", "country", "province", "province_text",
+           "range_master", "match_director", "stats_director", "use_squads"):
+    if _k in ss:
+        ss[_k] = ss[_k]     # widgets on a page that is not showing would otherwise forget their value
 
 # ==========================================
 # APPLY A PENDING MATCH LOAD (must run BEFORE any widgets are created)
@@ -1750,6 +1857,7 @@ if "pending_load" in ss:
     if data.get("match_level") in MATCH_LEVELS:
         ss["match_level"] = data["match_level"]
     ss["config_done"] = True   # a loaded match already has its configuration
+    ss["nav"] = "Dashboard"
     ss["range_master"] = data.get("range_master", "")
     ss["match_director"] = data.get("match_director", "")
     ss["stats_director"] = data.get("stats_director", "")
@@ -1757,6 +1865,7 @@ if "pending_load" in ss:
     stages = data.get("stages", [])
     if stages:
         ss["num_stages"] = max(1, min(20, len(stages)))
+        ss["stage_applied"] = set(range(1, len(stages[:20]) + 1))
         for idx, stg in enumerate(stages[:20], 1):
             ss[f"s_name_{idx}"] = stg.get("title", f"Stage {idx}")
             ss[f"s_loc_{idx}"] = stg.get("location", "")
@@ -1772,6 +1881,9 @@ if "pending_load" in ss:
 # ==========================================
 # APPLY A PENDING RENAME (keeps competitor dropdown selections pointing at the renamed person)
 # ==========================================
+if ss["match_level"] not in SQUAD_LEVELS:
+    ss["use_squads"] = False       # Level I and II matches never use squads (also covers loaded files)
+
 if "pending_rename" in ss:
     old_n, new_n = ss.pop("pending_rename")
     for k in list(ss.keys()):
@@ -2019,15 +2131,16 @@ def no_match_msg():
 def scope_pickers(key_prefix, div_label="Division", cat_label_text="Category", squad_label_text="Squad"):
     """Division, Category (and Squad, only when the match uses squads) dropdowns stacked in one column.
     Returns (div or None, cat or None, squad or None)."""
-    d = st.selectbox(div_label, [ALL_DIV] + divisions_present, key=f"{key_prefix}_div")
-    c = st.selectbox(cat_label_text, [ALL_CAT] + categories_present, key=f"{key_prefix}_cat",
+    _cols = st.columns(3 if ss["use_squads"] else 2)
+    d = _cols[0].selectbox(div_label, [ALL_DIV] + divisions_present, key=f"{key_prefix}_div")
+    c = _cols[1].selectbox(cat_label_text, [ALL_CAT] + categories_present, key=f"{key_prefix}_cat",
                      format_func=lambda x: x if x == ALL_CAT else cat_label(x))
     sq = None
     if ss["use_squads"]:
         opts = squad_choices()
         if ss.get(f"{key_prefix}_squad") not in opts:      # that squad no longer exists
             ss.pop(f"{key_prefix}_squad", None)
-        sq = squad_value(st.selectbox(squad_label_text, opts, key=f"{key_prefix}_squad"))
+        sq = squad_value(_cols[2].selectbox(squad_label_text, opts, key=f"{key_prefix}_squad"))
     return (None if d == ALL_DIV else d), (None if c == ALL_CAT else c), sq
 
 
@@ -2070,10 +2183,11 @@ match_state_data = {
 for st_entry, n in zip(match_state_data["stages"], stage_names):
     st_entry["exclude"] = bool(ss[f"excl_{stage_config[n]['idx']}"]) and stage_config[n]["ics"]
 
+_nav_slot = st.sidebar.container()
 st.sidebar.header("Tools")
-with st.sidebar.expander("💾 Match Data Persistence", expanded=False):
+with st.sidebar.expander("Match Data Persistence", expanded=False):
     st.download_button(
-        label="📥 Save Match State (JSON)",
+        label="Download match file (.json)",
         data=json.dumps(match_state_data, indent=4),
         file_name=f"{match_name}_backup.json",
         mime="application/json",
@@ -2081,10 +2195,10 @@ with st.sidebar.expander("💾 Match Data Persistence", expanded=False):
     st.caption("Select one backup to load it, or several to combine them into a single match.")
     merge_into_current = st.checkbox("Also merge with the current match (instead of replacing it)",
                                      value=False, key="merge_into_current")
-    uploaded_files = st.file_uploader("📂 Load / Merge Match State (JSON)", type=["json"],
+    uploaded_files = st.file_uploader("Load / Merge Match State (JSON)", type=["json"],
                                       accept_multiple_files=True, key=f"uploader_{ss.uploader_n}")
     if uploaded_files:
-        if st.button(f"🔀 Load {len(uploaded_files)} file(s)"):
+        if st.button(f"Load {len(uploaded_files)} file(s)", type="primary"):
             load_ok = False
             try:
                 datasets = []
@@ -2113,7 +2227,7 @@ with st.sidebar.expander("💾 Match Data Persistence", expanded=False):
         st.success(report["summary"])
         for w in report["warnings"]:
             st.warning(w)
-        if st.button("✖ Dismiss", key="dismiss_load_report"):
+        if st.button("Dismiss", key="dismiss_load_report"):
             ss.pop("load_report", None)
             st.rerun()
 
@@ -2183,7 +2297,7 @@ if not ss.get("member_file_loaded"):
             ss["member_msg_warn"] = f"Could not read members.json ({_err}). Starting with an empty Member List."
 
 
-with st.sidebar.expander("🏷️ Member List", expanded=False):
+with st.sidebar.expander("Member List", expanded=False):
     st.caption("Regular shooters with all their roster details. Not part of the Roster until you add them in the Competitor Roster tab. "
                "Saved automatically to members.json (next to app.py) and loaded every time the app opens.")
     with st.form("member_add_form", clear_on_submit=True):
@@ -2196,7 +2310,7 @@ with st.sidebar.expander("🏷️ Member List", expanded=False):
         m_ics = st.text_input("ICS")
         m_power = st.selectbox("Power", ["Minor", "Major"], key="m_power",
                                help="Production, Production Optics and PCC are Minor only.")
-        if st.form_submit_button("➕ Add to Member List"):
+        if st.form_submit_button("Add to Member List", type="primary"):
             if not m_name.strip():
                 st.error("Please enter a name.")
             elif not power_ok(m_div, m_power):
@@ -2215,7 +2329,7 @@ with st.sidebar.expander("🏷️ Member List", expanded=False):
     if ss.member_list:
         st.caption(f"{len(ss.member_list)} member(s) saved. To put members on the Roster, use "
                    "**Add Competitor from Member List** in the Competitor Roster tab.")
-        with st.popover("✏️ Edit a member"):
+        with st.popover("Edit a member"):
             _edit_name = st.selectbox("Select member to edit", [m["Competitor"] for m in ss.member_list],
                                       key="member_edit_sel")
             _cur = next((m for m in ss.member_list if m["Competitor"] == _edit_name), None)
@@ -2231,7 +2345,7 @@ with st.sidebar.expander("🏷️ Member List", expanded=False):
                     e_ics = st.text_input("ICS", value=_cur["ICS"])
                     e_power = st.selectbox("Power", ["Minor", "Major"], index=0 if _cur["Power"] == "Minor" else 1,
                                            help="Production, Production Optics and PCC are Minor only.")
-                    if st.form_submit_button("💾 Save Changes"):
+                    if st.form_submit_button("Save Changes", type="primary"):
                         new_name = e_name.strip()
                         if not new_name:
                             st.error("Please enter a name.")
@@ -2250,7 +2364,7 @@ with st.sidebar.expander("🏷️ Member List", expanded=False):
                             ss.pop("member_edit_sel", None)
                             st.rerun()
             st.caption("Changes apply to the Member List only. Competitors already on the Roster are not changed.")
-        with st.popover("🗑️ Remove names from the Member List"):
+        with st.popover("Remove names from the Member List"):
             to_remove = st.multiselect("Select names to remove", [c["Competitor"] for c in ss.member_list], key="member_remove_sel")
             if st.button("Remove selected", key="member_remove_btn") and to_remove:
                 ss.member_list = [c for c in ss.member_list if c["Competitor"] not in to_remove]
@@ -2259,7 +2373,7 @@ with st.sidebar.expander("🏷️ Member List", expanded=False):
     else:
         st.info("The Member List is empty. Add a member above.")
 
-with st.sidebar.expander("🖼️ Logos for Exports", expanded=False):
+with st.sidebar.expander("Logos for Exports", expanded=False):
     st.caption("Your PPSA (left) and MPRAI (right) logos are built in and appear on every Word/PDF export. "
                "Upload a file below only if you want to replace one.")
     for side, label in (("left", "Left logo"), ("right", "Right logo")):
@@ -2286,24 +2400,81 @@ logo_right = ss.get("logo_right") or default_logo("right")
 # ==========================================
 # MAIN APP HEADER
 # ==========================================
-st.title(f"🎯 {match_name if match_name else 'IPSC Match Scoring'}")
+_act = {c["Competitor"] for c in active_competitors}
+_done = sum(1 for (_sn, _nm) in ss.scores if _sn in stage_config and _nm in _act)
+_total = len(active_competitors) * num_stages
+_pct = int(100 * _done / _total) if _total else 0
+_e = _html.escape
 _place = ss["country"] + (f", {ss['province'] if ss['country'] == 'Philippines' else ss['province_text']}"
                           if (ss["province"] if ss["country"] == "Philippines" else ss["province_text"]) else "")
-st.caption(f"Date: {match_date.strftime('%B %d, %Y')} | {ss['match_level']} | {_place}")
+st.markdown("".join([
+    f"<div class='banner'><div><h1>{_e(match_name if match_name else 'IPSC Match Scoring')}</h1>",
+    f"<div class='b-meta'><span>{match_date.strftime('%B %d, %Y')}</span><span>{_e(ss['match_level'])}</span><span>{_e(_place)}</span></div></div>",
+    f"<div class='b-stats'><div><b>{len(ss.competitors_list)}</b><span>Competitors</span></div>",
+    f"<div><b>{num_stages}</b><span>Stages</span></div>",
+    f"<div><b>{_done}/{_total}</b><span>Scores entered</span></div></div>",
+    f"<div class='b-bar'><i style='width:{_pct}%'></i></div></div>"]), unsafe_allow_html=True)
 
-(tab_cfg, main_tab_roster, tab_stage_setup, tab_scoring,
- tab_results, tab_hits) = st.tabs([
-    "⚙️ Match Configuration", "👤 Competitor Roster", "📋 Stage Set-up", "🎯 Match Scoring",
-    "📊 Results", "📈 Hit Breakdown and Graphs"])
+PAGES = ["Dashboard", "Match setup", "Roster", "Stage set-up", "Scoring", "Results", "Hit breakdown"]
+if not ss["config_done"]:
+    ss["nav"] = "Match setup"
+elif ss.get("nav") not in PAGES:
+    ss["nav"] = "Dashboard"
+with _nav_slot:
+    st.markdown("<div class='brand'>IPSC Scoring<span>Match control centre</span></div>", unsafe_allow_html=True)
+nav = ss["nav"]
+
+
+if nav == "Dashboard":
+    page_head("Match dashboard")
+    _tiles = [("Match setup", "Match details, officials, squads, match file"), ("Roster", "Add, edit and remove competitors"),
+              ("Stage set-up", "Targets, courses and ICS stages"), ("Scoring", "Enter scores and see who is still waiting"),
+              ("Hit breakdown", "Hit totals, charts, player reports, head to head"), ("Results", "Stage and overall results, exports")]
+    _stg_ok = len([i for i in ss.get("stage_applied", set())
+                   if 1 <= i <= num_stages and sum(int(ss[f"{k}_{i}"]) for k in ("p", "pl", "po", "dis")) > 0])
+    _sent = ss.get("exported", set())
+    _pcts = {"Match setup": 100.0 if ss["config_done"] else 0.0, "Roster": 100.0 if ss.competitors_list else 0.0,
+             "Stage set-up": 100.0 * _stg_ok / num_stages, "Scoring": 100.0 * _done / _total if _total else 0.0,
+             "Hit breakdown": 100.0 if "Hit breakdown" in _sent else 0.0, "Results": 100.0 if "Results" in _sent else 0.0}
+    _keys = {"Match setup": "setup", "Roster": "roster", "Stage set-up": "stages", "Scoring": "scoring",
+             "Hit breakdown": "hits", "Results": "results"}
+    _fill = "".join(".st-key-tile_%s button{background:linear-gradient(90deg,rgba(245,158,11,.5) %.1f%%,rgba(128,128,128,.14) %.1f%%)!important}"
+                    % (_keys[k], p, p) for k, p in _pcts.items() if 0 < p < 99.999)
+    if _fill:
+        st.markdown("<style>" + _fill + "</style>", unsafe_allow_html=True)
+    for _row in range(0, len(_tiles), 3):
+        for _col, (_pg, _desc) in zip(st.columns(3), _tiles[_row:_row + 3]):
+            _col.button(_pg, key=f"tile_{_keys[_pg]}", on_click=_go, args=(_pg,), use_container_width=True,
+                        type="primary" if _pcts[_pg] >= 99.999 else "secondary")
+    st.markdown("### Match Summary")
+    _tdis = sum(stage_config[n]["disappearing"] for n in stage_names)
+    _tg = [("Paper targets", sum(stage_config[n]["paper"] + stage_config[n]["disappearing"] for n in stage_names), "#CBD5E1",
+            f"includes {_tdis} disappearing" if _tdis else ""),
+           ("Plates", sum(stage_config[n]["plates"] for n in stage_names), "#94A3B8", ""),
+           ("Poppers", sum(stage_config[n]["poppers"] for n in stage_names), "#64748B", ""),
+           ("Penalty targets", sum(stage_config[n]["penalty"] for n in stage_names), "#475569", "")]
+    _tt = sum(t[1] for t in _tg)
+    _card = lambda v, label, sub="", cls="", dot="": (f"<div class='mc {cls}'><b>{v}</b><span>"
+                                                     + (f"<u style='background:{dot}'></u>" if dot else "") + f"{label}</span>"
+                                                     + (f"<small>{sub}</small>" if sub else "") + "</div>")
+    st.markdown("".join([
+        "<div class='ms g3'>",
+        _card(num_stages, "Stages", cls="big"),
+        _card(len(ss.competitors_list), "Competitors", cls="big"),
+        _card(sum(stage_config[n]["min_rounds"] for n in stage_names), "Minimum rounds", cls="big"),
+        "</div>",
+        ("<div class='mix'>" + "".join(f"<i style='width:{100 * v / _tt:.2f}%;background:{c}'></i>" for _, v, c, _x in _tg if v) + "</div>") if _tt else "",
+        "<div class='ms g4'>" + "".join(_card(v, label, sub, dot=c) for label, v, c, sub in _tg) + "</div>"]),
+        unsafe_allow_html=True)
 
 # ------------------------------------------
 # TAB 1: MATCH CONFIGURATION
 # ------------------------------------------
-with tab_cfg:
-    st.header("⚙️ Match Configuration")
+if nav == "Match setup":
+    page_head("Match Configuration")
     locked = bool(ss["config_done"])
     if locked:
-        st.success("🔒 Match configuration applied. The other tabs are unlocked.")
+        st.success("Match configuration applied. The other tabs are unlocked.")
     else:
         st.info("Fill in the match details below, then press **Apply Match Configuration** to unlock the other tabs.")
     c1, c2 = st.columns(2)
@@ -2320,61 +2491,44 @@ with tab_cfg:
         st.text_input("Range Master", key="range_master", disabled=locked)
         st.text_input("Match Director", key="match_director", disabled=locked)
         st.text_input("Stats Director", key="stats_director", disabled=locked)
-    st.checkbox("Use Squads", key="use_squads", disabled=locked,
-                help="When checked, every competitor gets a squad number in the Competitor Roster, and Match Scoring "
-                     "and Results get a Squad dropdown.")
+    if ss["match_level"] in SQUAD_LEVELS:
+        st.checkbox("Use Squads", key="use_squads", disabled=locked,
+                    help="When checked, every competitor gets a squad number in the Competitor Roster, and Match Scoring "
+                         "and Results get a Squad dropdown.")
 
     if locked:
-        if st.button("✏️ Edit Match Configuration", key="cfg_edit"):
+        if st.button("Edit Match Configuration", key="cfg_edit"):
             ss["config_done"] = False
             st.rerun()
     else:
-        if st.button("✅ Apply Match Configuration", type="primary", key="cfg_apply"):
+        if st.button("Apply Match Configuration", type="primary", key="cfg_apply"):
             if not str(ss["match_name"]).strip():
                 st.error("Please enter a match name.")
             else:
                 ss["config_done"] = True
+                ss["nav"] = "Dashboard"
                 st.rerun()
 
-    st.markdown("### 🎯 Summary of Targets (whole match)")
-    st.caption("Calculated automatically from the Stage Set-up tab and the Roster.")
-    tp = sum(stage_config[n]["paper"] + stage_config[n]["disappearing"] for n in stage_names)
-    td_ = sum(stage_config[n]["disappearing"] for n in stage_names)
-    sc1, sc2 = st.columns(2)
-    with sc1:
-        st.markdown(
-            f"- **Paper Targets:** {tp}" + (f" (includes {td_} disappearing)" if td_ else "") + "\n"
-            f"- **Plates:** {sum(stage_config[n]['plates'] for n in stage_names)}\n"
-            f"- **Poppers:** {sum(stage_config[n]['poppers'] for n in stage_names)}\n"
-            f"- **Penalty Targets:** {sum(stage_config[n]['penalty'] for n in stage_names)}")
-    with sc2:
-        st.markdown(
-            f"- **Number of Stages:** {num_stages}\n"
-            f"- **Number of Competitors:** {len(ss.competitors_list)}\n"
-            f"- **Minimum Rounds:** {sum(stage_config[n]['min_rounds'] for n in stage_names)}")
 
 # Match Configuration must be applied before anything else can be used
 if not ss["config_done"]:
-    for _t in (main_tab_roster, tab_stage_setup, tab_scoring, tab_results, tab_hits):
-        with _t:
-            st.info("🔒 Complete the **Match Configuration** tab first (press **Apply Match Configuration**) to unlock this tab.")
     st.stop()
 
 # ------------------------------------------
 # TAB 2: COMPETITOR ROSTER MANAGEMENT
 # ------------------------------------------
-with main_tab_roster:
-    st.header("👤 Competitor Roster Management")
+if nav == "Roster":
+    page_head("Competitor Roster Management")
     col_add, col_edit = st.columns(2)
 
     with col_add:
-        with st.expander("📋 Add Competitor from Member List", expanded=False):
+        with st.expander("Add Competitor from Member List", expanded=False):
             if ss.get("member_roster_msg"):
                 st.success(ss.pop("member_roster_msg"))
             _in_roster = {c["Competitor"].lower() for c in ss.competitors_list}
             _avail = [m for m in ss.member_list if m["Competitor"].lower() not in _in_roster]
             if not ss.member_list:
-                st.info("The Member List is empty. Add members in the sidebar (🏷️ Member List) first.")
+                st.info("The Member List is empty. Add members in the sidebar (Member List) first.")
             elif not _avail:
                 st.info("Everyone in the Member List is already on the Roster.")
             else:
@@ -2387,7 +2541,7 @@ with main_tab_roster:
                                                    value=0, key="roster_from_member_squad"))
                 st.caption("Each gets the next free competitor # and keeps the details saved in the Member List. "
                            "Use Edit or Delete Competitor to change details afterwards.")
-                if st.button("➕ Add Selected to Roster", key="roster_from_member_btn", disabled=not _picked):
+                if st.button("Add Selected to Roster", key="roster_from_member_btn", disabled=not _picked, type="primary"):
                     _next = max([int(x["#"]) for x in ss.competitors_list], default=0) + 1
                     for _lbl in _picked:
                         m = _by_label[_lbl]
@@ -2400,7 +2554,7 @@ with main_tab_roster:
                     ss.pop("roster_from_member_sel", None)
                     st.rerun()
 
-        with st.expander("➕ Add New Competitor", expanded=True):
+        with st.expander("Add New Competitor", expanded=False):
             with st.form("add_competitor_form", clear_on_submit=True):
                 c_name = st.text_input("Competitor Name", value="")
                 next_default_num = max([int(c["#"]) for c in ss.competitors_list], default=0) + 1
@@ -2418,7 +2572,7 @@ with main_tab_roster:
                     c_squad = int(st.number_input("Squad # (0 = no squad)", min_value=0, step=1, value=0, key="add_squad"))
                 c_dq = st.checkbox("Disqualified (DQ)", value=False, key="add_dq")
 
-                if st.form_submit_button("➕ Add Competitor"):
+                if st.form_submit_button("Add Competitor", type="primary"):
                     new_comp_name = c_name.strip()
                     if not new_comp_name:
                         st.error("Please enter a competitor name.")
@@ -2437,7 +2591,7 @@ with main_tab_roster:
                         st.rerun()
 
     with col_edit:
-        with st.expander("✏️ Edit or Delete Competitor", expanded=False):
+        with st.expander("Edit or Delete Competitor", expanded=False):
             if ss.competitors_list:
                 comp_names = [c["Competitor"] for c in ss.competitors_list]
                 selected_to_edit = st.selectbox("Select Competitor to Edit/Delete", options=comp_names, key="select_edit_comp")
@@ -2461,9 +2615,7 @@ with main_tab_roster:
                                                       key=f"edit_squad_{fv}_{selected_to_edit}"))
                     e_dq = st.checkbox("Disqualified (DQ)", value=bool(current_data.get("DQ", False)), key=f"edit_dq_{fv}_{selected_to_edit}")
 
-                    b_col1, b_col2 = st.columns(2)
-                    save_changes = b_col1.form_submit_button("💾 Save Changes")
-                    delete_shooter = b_col2.form_submit_button("🗑️ Delete Competitor")
+                    save_changes = st.form_submit_button("Save Changes", type="primary")
 
                     if save_changes:
                         new_name = e_name.strip()
@@ -2487,15 +2639,16 @@ with main_tab_roster:
                             st.success("Competitor updated successfully!")
                             st.rerun()
 
-                    if delete_shooter:
+                with st.popover("Delete competitor"):
+                    st.warning(f"This removes {selected_to_edit} and all of their saved scores. It cannot be undone.")
+                    if st.button("Yes, delete", key="confirm_delete"):
                         ss.competitors_list = [c for c in ss.competitors_list if c["Competitor"] != selected_to_edit]
                         ss.scores = {k: v for k, v in ss.scores.items() if k[1] != selected_to_edit}
-                        st.warning(f"Deleted {selected_to_edit}!")
                         st.rerun()
             else:
                 st.info("No competitors available to edit.")
 
-    st.markdown("### 📋 Official Roster Summary")
+    st.markdown("### Official Roster Summary")
     if ss.competitors_list:
         df_roster = pd.DataFrame(ss.competitors_list)
         df_roster["Division"] = df_roster.get("Division", DIVISIONS[0])
@@ -2511,8 +2664,8 @@ with main_tab_roster:
 # ------------------------------------------
 # TAB 3: STAGE SET-UP
 # ------------------------------------------
-with tab_stage_setup:
-    st.header("📋 Stage Set-up")
+if nav == "Stage set-up":
+    page_head("Stage Set-up")
     with st.form("num_stages_form", border=False):
         sn1, sn2 = st.columns([2, 1])
         with sn1:
@@ -2520,10 +2673,10 @@ with tab_stage_setup:
                             help="Creates that many sections below.")
         with sn2:
             st.write("")
-            st.form_submit_button("✅ Apply Number of Stages")
+            st.form_submit_button("Apply Number of Stages", type="primary")
     st.caption("Press **Apply Stage** at the bottom of each section to save its changes.")
     if title_problem:
-        st.error("⚠️ Every stage needs its own non-empty title. Duplicate or blank titles will mix up scores.")
+        st.error("Every stage needs its own non-empty title. Duplicate or blank titles will mix up scores.")
     fv_s = ss["form_ver"]
     for s in range(1, num_stages + 1):
         title_now = str(ss[f"s_name_{s}"])
@@ -2547,7 +2700,7 @@ with tab_stage_setup:
                                 help="Counts like a paper target for max points (2 rounds, 5 points each); a miss is not penalized.")
                 st.number_input("Penalty Targets", min_value=0, step=1, value=int(ss[f"pen_{s}"]), key=dk("pen"),
                                 help="Each Penalty target allows up to 2 NS hits when scoring (0 targets = NS locked).")
-            if st.button(f"✅ Apply Stage {s}", key=f"apply_stage_{s}"):
+            if st.button(f"Apply Stage {s}", key=f"apply_stage_{s}", type="primary"):
                 ss[f"s_name_{s}"] = ss[dk("name")]
                 ss[f"s_loc_{s}"] = ss[dk("loc")]
                 ss[f"s_course_{s}"] = ss[dk("course")]
@@ -2556,6 +2709,7 @@ with tab_stage_setup:
                 ics_yes = ss[dk("ics")] == "Yes"
                 ss[f"ics_{s}"] = ics_yes
                 ss[f"excl_{s}"] = ics_yes and ss.get(dk("excl"), "No") == "Yes"
+                ss.setdefault("stage_applied", set()).add(s)
                 st.rerun()
             cfg_s = stage_config[title_now] if not title_problem else None
             if cfg_s:
@@ -2571,19 +2725,22 @@ with tab_stage_setup:
 # ------------------------------------------
 # TAB 4: MATCH SCORING
 # ------------------------------------------
-with tab_scoring:
-    st.header("🎯 Match Scoring")
+if nav == "Scoring":
+    page_head("Match Scoring")
     if title_problem:
         st.error("Fix the stage titles in the Stage Set-up tab first (they must be unique and not blank).")
     elif not active_competitors:
         st.warning("No active (non-DQ) competitors available. Add competitors in the Roster tab.")
     else:
         fv = ss["form_ver"]
-        for s_name in stage_names:
+        if ss.get("score_stage") not in stage_names:
+            ss.pop("score_stage", None)
+        _stage_pick = st.selectbox("Stage", stage_names, key="score_stage")
+        for s_name in [_stage_pick]:
             cfg = stage_config[s_name]
             si = cfg["idx"]
             with st.expander(f"{s_name}" + ("  (ICS classifier - excluded from overall)" if cfg["exclude"]
-                                           else "  (ICS classifier)" if cfg["ics"] else ""), expanded=False):
+                                           else "  (ICS classifier)" if cfg["ics"] else ""), expanded=True):
                 st.info(f"Targets: **{cfg['paper']} Paper** | **{cfg['disappearing']} Disappearing** | **{cfg['plates']} Plates** | "
                         f"**{cfg['poppers']} Poppers** | **{cfg['penalty']} Penalty** | Minimum Rounds: **{cfg['min_rounds']}** | "
                         f"Max Points: **{cfg['max_pts']}**")
@@ -2602,8 +2759,15 @@ with tab_scoring:
                         continue
                     if ss.get(sel_key) not in [c["Competitor"] for c in pool]:   # e.g. competitor moved to another squad
                         ss.pop(sel_key, None)
-                selected_shooter = st.selectbox("Select Competitor to Enter Score",
-                                                options=[c["Competitor"] for c in pool], key=sel_key)
+                _ps = ss.get("pending_select")
+                if _ps and _ps[0] == sel_key:
+                    ss[sel_key] = _ps[1]
+                    ss.pop("pending_select")
+                _fl = ss.get("score_flash")
+                if _fl and _fl[0] == si:
+                    st.success(ss.pop("score_flash")[1])
+                selected_shooter = st.selectbox("Select competitor to enter score", options=[c["Competitor"] for c in pool],
+                                                key=sel_key, format_func=lambda n, sn=s_name: f"{n}  (scored)" if (sn, n) in ss.scores else n)
                 shooter_info = next(c for c in pool if c["Competitor"] == selected_shooter)
                 pf = shooter_info["Power"]
 
@@ -2661,14 +2825,16 @@ with tab_scoring:
                     hits_acd = alpha + charlie + delta
                     accounted = hits_acd + mike
                     if hits_acd > score_cap:
-                        st.error(f"❌ A + C + D ({hits_acd}) exceed the allowed {score_cap}!")
+                        st.error(f"A + C + D ({hits_acd}) exceed the allowed {score_cap}!")
                     elif total_rounds > 0 and accounted > total_rounds:
-                        st.error(f"❌ Hits and mikes ({accounted}) exceed the stage's {total_rounds} rounds!")
+                        st.error(f"Hits and mikes ({accounted}) exceed the stage's {total_rounds} rounds!")
                     elif total_rounds > 0:
                         st.caption(f"Accounted rounds: **{accounted}** / {total_rounds}")
 
-                    save_score = st.form_submit_button("💾 Save Score")
-                    if save_score:
+                    b_save, b_next, _sp = st.columns([1, 1, 3])
+                    save_score = b_save.form_submit_button("Save score", type="primary")
+                    save_next = b_next.form_submit_button("Save and next")
+                    if save_score or save_next:
                         if hits_acd > score_cap:
                             st.error(f"Cannot save: A + C + D ({hits_acd}) exceed the allowed {score_cap}.")
                         elif accounted > total_rounds:
@@ -2677,9 +2843,15 @@ with tab_scoring:
                             is_dnf = (c_status == "Did Not Finish (DNF)")
                             ss.scores[key] = {"time": raw_time, "A": alpha, "C": charlie, "D": delta,
                                               "M": mike, "NS": no_shoot, "Proc": proc, "DNF": is_dnf, "PF": pf}
+                            if save_next and len(pool) > 1:
+                                _names = [c["Competitor"] for c in pool]
+                                _nxt = _names[(_names.index(selected_shooter) + 1) % len(_names)]
+                                ss["pending_select"] = (sel_key, _nxt)
+                                ss["score_flash"] = (si, f"Saved {selected_shooter}. Now scoring {_nxt}.")
+                                st.rerun()
                             st.success(f"Score saved for {selected_shooter}!")
                             if raw_time <= 0 and not is_dnf:
-                                st.warning(f"⚠️ Time is 0.00 for {selected_shooter}. A scored run with no time earns **0 points** "
+                                st.warning(f"Time is 0.00 for {selected_shooter}. A scored run with no time earns **0 points** "
                                            f"(hit factor can't be calculated). Enter the time, or set the status to DNF.")
 
                     saved = ss.scores.get(key)
@@ -2701,8 +2873,24 @@ with tab_scoring:
         # warn about saved runs with zero time
         zero_names = sorted({k[1] for k, v in ss.scores.items() if k[0] in stage_config and not v.get("DNF", False) and v.get("time", 0) <= 0})
         if zero_names:
-            st.warning(f"⚠️ **Time is 0.00 (not marked DNF) for:** {', '.join(zero_names)} (on at least one stage). "
+            st.warning(f"**Time is 0.00 (not marked DNF) for:** {', '.join(zero_names)} (on at least one stage). "
                        f"They receive **0 points** on those stages until a time is entered or DNF is set.")
+
+        # scoring status: is everybody scored, and if not, who is still missing
+        _miss = {_sg: [c["Competitor"] for c in active_competitors if (_sg, c["Competitor"]) not in ss.scores] for _sg in stage_names}
+        _left = sum(len(_w) for _w in _miss.values())
+        _all = len(active_competitors) * len(stage_names)
+        _out = ["<div class='ss'><b>" + ("All competitors scored" if not _left else f"{_left} score{'s' if _left != 1 else ''} missing")
+                + f"</b><span>{_all - _left} of {_all} entered</span></div>"]
+        for _sg, _w in _miss.items():
+            if _w:
+                _pills = "".join(f"<span class='pill'>{_e(w)}</span>" for w in _w[:15]) + (f"<span class='pill'>+{len(_w) - 15} more</span>" if len(_w) > 15 else "")
+                _out.append(f"<div class='sr'><div class='sh'><span>{_e(_sg)}</span><em>{len(_w)} left</em></div><div class='pl'>{_pills}</div></div>")
+        _full = [_sg for _sg, _w in _miss.items() if not _w]
+        if _full and _left:
+            _out.append("<div class='sdone'>Complete: " + ", ".join(_e(x) for x in _full) + "</div>")
+        st.markdown("### Scoring status")
+        st.markdown("".join(_out), unsafe_allow_html=True)
 
 # ------------------------------------------
 # TAB 5: RESULTS (STAGE + OVERALL)
@@ -2715,7 +2903,7 @@ EXPORT_COLS = ["Rank", "Stage %", "Stage Points", "#", "Competitor", "Cat", "Reg
 
 def stage_export_df(df, with_division):
     out = df[EXPORT_COLS].copy()
-    out["Stage %"] = out["Stage %"].round(2).astype(str) + "%"
+    out["Stage %"] = out["Stage %"].map(lambda v: f"{v:.2f}")
     out["Stage Points"] = out["Stage Points"].round(4)
     if with_division:
         out["Division"] = df["Division"]
@@ -2733,8 +2921,8 @@ def export_title_lines(div, cat, squad, what, results=True):
 
 def export_row(container_cols, title_lines, file_stub, df_export, key):
     lines = [(match_name, 16, True)] + title_lines + [(date_line(), 10, False)]
-    pdf_export_button(container_cols[0], "📥 Download PDF (.pdf)", file_stub + ".pdf", lines, df_export, key=f"pdf_{key}")
-    word_export_button(container_cols[1], "📥 Download Word (.docx)", file_stub + ".docx", lines, df_export, key=f"word_{key}")
+    pdf_export_button(container_cols[0], "Download PDF (.pdf)", file_stub + ".pdf", lines, df_export, key=f"pdf_{key}")
+    word_export_button(container_cols[1], "Download Word (.docx)", file_stub + ".docx", lines, df_export, key=f"word_{key}")
 
 
 OVERALL_COLS = ["Rank", "%", "Points", "#", "Competitor", "Division", "Cat", "Reg", "Cls", "Tag", "ICS", "Power"]
@@ -2743,22 +2931,22 @@ OVERALL_COLS = ["Rank", "%", "Points", "#", "Competitor", "Division", "Cat", "Re
 def overall_export_df(df, with_division):
     cols = ["Rank", "%", "Points", "#", "Competitor", "Cat", "Reg", "Cls", "Tag", "ICS", "Power"]
     out = df[cols].copy()
-    out["%"] = out["%"].round(2).astype(str) + "%"
+    out["%"] = out["%"].map(lambda v: f"{v:.2f}")
     out["Points"] = out["Points"].round(4)
     if with_division:
         out["Division"] = df["Division"]
     return out
 
 
-with tab_results:
-    st.header("📊 Results")
+if nav == "Results":
+    page_head("Results")
     if title_problem:
         st.error("Fix the stage titles in the Stage Set-up tab first.")
     elif not active_competitors:
         st.warning("No active (non-DQ) competitors available.")
     else:
         # ---------- STAGE RESULTS ----------
-        with st.expander("📊 Stage Results", expanded=False):
+        with st.expander("Stage Results", expanded=False):
             sr_div, sr_cat, sr_sq = scope_pickers("stage_res")
             sr_tables, _ = get_scope(sr_div, sr_cat, sr_sq)
             if not sr_tables:
@@ -2779,7 +2967,7 @@ with tab_results:
                                    stage_export_df(df, sr_div is None), f"stg_{si}_{scope_file(sr_div, sr_cat, sr_sq)}")
 
         # ---------- OVERALL RESULTS ----------
-        with st.expander("🏆 Overall Results", expanded=False):
+        with st.expander("Overall Results", expanded=False):
             if excluded_stages:
                 st.info("Excluded from the overall totals (ICS classifier): " + ", ".join(sorted(excluded_stages)))
             ov_div, ov_cat, ov_sq = scope_pickers("overall_res")
@@ -2796,14 +2984,14 @@ with tab_results:
 # ------------------------------------------
 # TAB 6: HIT BREAKDOWN AND GRAPHS
 # ------------------------------------------
-with tab_hits:
-    st.header("📈 Hit Breakdown and Graphs")
+if nav == "Hit breakdown":
+    page_head("Hit Breakdown and Graphs")
     if title_problem:
         st.error("Fix the stage titles in the Stage Set-up tab first.")
     elif not active_competitors:
         st.warning("No active (non-DQ) competitors available.")
     else:
-        with st.expander("🔍 Cumulative Hit Breakdown", expanded=False):
+        with st.expander("Cumulative Hit Breakdown", expanded=False):
             cum_div, cum_cat, cum_sq = scope_pickers("cum", "Ranking scope (Division)", "Ranking scope (Category)",
                                                      "Ranking scope (Squad)")
             scope = scope_text(cum_div, cum_cat, cum_sq)
@@ -2815,7 +3003,7 @@ with tab_hits:
                 recs = []
                 for _, r in base.iterrows():
                     h = cum_hits(r["Competitor"])
-                    recs.append({"Rank": r["Rank"], "%": f"{r['%']:.2f}%", "Points": f"{r['Points']:.4f}", "#": r["#"],
+                    recs.append({"Rank": r["Rank"], "%": f"{r['%']:.2f}", "Points": f"{r['Points']:.4f}", "#": r["#"],
                                  "Competitor": r["Competitor"], "A": h["A"], "C": h["C"], "D": h["D"], "M": h["M"],
                                  "NS": h["NS"], "P": h["P"], "Total Time": f"{h['time']:.2f}"})
                 df_cum = pd.DataFrame(recs)
@@ -2829,11 +3017,11 @@ with tab_hits:
                         **{HIT_FULL[k]: cc[k] for k in ("A", "C", "D", "M", "NS", "P")},
                         "Total Time": f"{cc['Total Time']}s"}]), center_all=True, fit=True)
                     st.caption("A includes steel hits. P = procedural penalties.")
-                st.markdown("#### 📥 Export Full Roster Cumulative Breakdown")
+                st.markdown("#### Export Full Roster Cumulative Breakdown")
                 export_row(st.columns(2), export_title_lines(cum_div, cum_cat, cum_sq, "Cumulative Summary", results=False),
                            safe(f"{match_name}_{scope_file(cum_div, cum_cat, cum_sq)}_Full_Roster_Cumulative_Summary"), df_cum, "cum_roster")
 
-        with st.expander("👤 Individual Player Report", expanded=False):
+        with st.expander("Individual Player Report", expanded=False):
             report_name = st.selectbox("Select Competitor for the player report:",
                                        options=overall_all["Competitor"].tolist(), key="select_player_report")
             if report_name:
@@ -2891,12 +3079,50 @@ with tab_hits:
                 if excluded_stages:
                     st.caption("* ICS classifier stage excluded from the overall totals.")
 
-                st.markdown("#### 📥 Export Player Report")
+                st.markdown("#### Export Player Report")
                 pr_col1, pr_col2 = st.columns(2)
                 pr_lines = [(match_name, 16, True), (f"{rep['division']} (Individual Player Report)", 12, False),
                             (f"{report_name} (#{rep['num']})  |  {date_line()}", 10, False)]
                 pr_file = safe(f"{match_name}_{rep['division']}_{report_name}_Player_Report")
-                pdf_export_button(pr_col1, "📥 Download Player Report PDF (.pdf)", pr_file + ".pdf",
+                pdf_export_button(pr_col1, "Download Player Report PDF (.pdf)", pr_file + ".pdf",
                                   pr_lines, None, key="dl_player_pdf", sections=rep["sections"], footer_df=rep["facts_df"])
-                word_export_button(pr_col2, "📥 Download Player Report Word (.docx)", pr_file + ".docx",
+                word_export_button(pr_col2, "Download Player Report Word (.docx)", pr_file + ".docx",
                                    pr_lines, None, key="dl_player_word", sections=rep["sections"], footer_df=rep["facts_df"])
+
+        with st.expander("Head to Head Comparison", expanded=False):
+            hh_div, hh_cat, hh_sq = scope_pickers("h2h", "Compare within (Division)", "Compare within (Category)", "Compare within (Squad)")
+            hh_tables, hh_ov = get_scope(hh_div, hh_cat, hh_sq)
+            _opts = hh_ov["Competitor"].tolist() if not hh_ov.empty else []
+            for _k in ("h2h_a", "h2h_b"):
+                if ss.get(_k) not in _opts:
+                    ss.pop(_k, None)
+            if len(_opts) < 2:
+                st.info("Head to head needs at least two competitors in this group.")
+            else:
+                h1, h2 = st.columns(2)
+                a_n = h1.selectbox("Competitor A", _opts, key="h2h_a")
+                b_n = h2.selectbox("Competitor B", _opts, index=1, key="h2h_b")
+                if a_n == b_n:
+                    st.info("Pick two different competitors.")
+                else:
+                    ra = hh_ov[hh_ov["Competitor"] == a_n].iloc[0]
+                    rb = hh_ov[hh_ov["Competitor"] == b_n].iloc[0]
+                    gap = float(ra["Points"]) - float(rb["Points"])
+                    st.markdown(f"**{a_n if gap > 0 else b_n} leads by {abs(gap):.4f} points**" if gap else "**Level on points**")
+                    cols = ["Stage", f"{a_n} pts", f"{b_n} pts", "Difference (A - B)", f"{a_n} HF", f"{b_n} HF"]
+                    rows = []
+                    for x in stage_names:
+                        t = hh_tables.get(x)
+                        label = x + (" *" if x in excluded_stages else "")
+                        xa = None if t is None or t.empty else t[t["Competitor"] == a_n]
+                        xb = None if t is None or t.empty else t[t["Competitor"] == b_n]
+                        if xa is None or xa.empty or xb is None or xb.empty or not ss.scores.get((x, a_n)) or not ss.scores.get((x, b_n)):
+                            rows.append([label, "-", "-", "-", "-", "-"])
+                            continue
+                        pa, pb = float(xa.iloc[0]["Stage Points"]), float(xb.iloc[0]["Stage Points"])
+                        rows.append([label, f"{pa:.4f}", f"{pb:.4f}", f"{pa - pb:+.4f}",
+                                     f"{float(xa.iloc[0]['Hit Factor']):.4f}", f"{float(xb.iloc[0]['Hit Factor']):.4f}"])
+                    rows.append(["Total", f"{float(ra['Points']):.4f}", f"{float(rb['Points']):.4f}", f"{gap:+.4f}", "", ""])
+                    show_centered_table(pd.DataFrame(rows, columns=cols), center_all=True, fit=True, bold_last=True)
+                    if excluded_stages:
+                        st.caption("* ICS classifier stage excluded from the overall totals.")
